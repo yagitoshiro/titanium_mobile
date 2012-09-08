@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -9,15 +9,15 @@ package org.appcelerator.titanium;
 import java.io.IOException;
 import java.lang.ref.WeakReference;
 
+import org.appcelerator.kroll.KrollRuntime;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
+import org.appcelerator.kroll.util.KrollAssetHelper;
 import org.appcelerator.titanium.kroll.KrollContext;
 import org.appcelerator.titanium.util.TiFileHelper;
 import org.appcelerator.titanium.util.TiUrl;
 import org.appcelerator.titanium.util.TiWeakList;
 
 import android.app.Activity;
-import android.app.Service;
 import android.content.ContextWrapper;
 import android.os.Looper;
 import android.os.Message;
@@ -26,10 +26,7 @@ import android.os.RemoteException;
 
 public class TiContext// implements ErrorReporter
 {
-	private static final String LCAT = "TiContext";
-	private static final boolean DBG = TiConfig.LOGD;
-	@SuppressWarnings("unused")
-	private static final boolean TRACE = TiConfig.LOGV;
+	private static final String TAG = "TiContext";
 
 	public static final int LIFECYCLE_ON_START = 0;
 	public static final int LIFECYCLE_ON_RESUME = 1;
@@ -42,16 +39,12 @@ public class TiContext// implements ErrorReporter
 	private TiUrl baseUrl;
 	private String currentUrl;
 	private boolean launchContext;
-	private boolean serviceContext; // Contexts created for Ti services won't have associated activities.
 
 	private WeakReference<Activity> weakActivity;
 	private TiApplication tiApp;
 	protected KrollContext krollContext;
-	//protected KrollBridge krollBridge;
 
 	private TiWeakList<OnLifecycleEvent> lifecycleListeners;
-	private TiWeakList<OnServiceLifecycleEvent> serviceLifecycleListeners;
-
 
 	public static interface OnLifecycleEvent {
 		void onStart(Activity activity);
@@ -59,10 +52,6 @@ public class TiContext// implements ErrorReporter
 		void onPause(Activity activity);
 		void onStop(Activity activity);
 		void onDestroy(Activity activity);
-	}
-
-	public static interface OnServiceLifecycleEvent {
-		void onDestroy(Service service);
 	}
 
 	public TiContext(Activity activity, String baseUrl)
@@ -82,30 +71,14 @@ public class TiContext// implements ErrorReporter
 		}
 		this.baseUrl = new TiUrl(baseUrl, null);
 
-		if (activity instanceof TiActivity) {
-			//((TiActivity)activity).addTiContext(this);
-		}
-
-		if (DBG) {
-			Log.e(LCAT, "BaseURL for context is " + baseUrl);
-		}
+		Log.e(TAG, "BaseURL for context is " + baseUrl, Log.DEBUG_MODE);
 	}
 
 	public boolean isUIThread()
 	{
 		return Thread.currentThread().getId() == mainThreadId;
 	}
-/*
-	public KrollBridge getKrollBridge()
-	{
-		//return krollBridge;
-	}
 
-	public void setKrollBridge(KrollBridge bridge)
-	{
-		//this.krollBridge = bridge;
-	}
-*/
 	public Activity getActivity()
 	{
 		if (weakActivity == null) return null;
@@ -115,9 +88,6 @@ public class TiContext// implements ErrorReporter
 
 	public void setActivity(Activity activity)
 	{
-		if (activity instanceof TiActivity) {
-			//((TiActivity)activity).addTiContext(this);
-		}
 		weakActivity = new WeakReference<Activity>(activity);
 	}
 
@@ -143,13 +113,11 @@ public class TiContext// implements ErrorReporter
 
 	public String resolveUrl(String scheme, String path)
 	{
-		//return baseUrl.resolve(this, baseUrl.baseUrl, path, scheme);
 		return "";
 	}
 
 	public String resolveUrl(String scheme, String path, String relativeTo)
 	{
-		//return baseUrl.resolve(this, relativeTo, path, scheme);
 		return "";
 	}
 
@@ -165,6 +133,10 @@ public class TiContext// implements ErrorReporter
 
 	// Javascript Support
 
+	/**
+	 * @deprecated
+	 * @see KrollRuntime#evalString(String)
+	 */
 	public Object evalFile(String filename, Messenger messenger, int messageId)
 		throws IOException
 	{
@@ -176,78 +148,53 @@ public class TiContext// implements ErrorReporter
 			setUrlBackTo = this.currentUrl;
 		}
 		this.currentUrl = filename;
-/*		if (krollBridge == null) {
-			if (DBG) {
-				Log.w(LCAT, "Cannot eval file '" + filename + "'. Context has been released already.");
-			}
-			if (setUrlBackTo != null) { this.currentUrl = setUrlBackTo; }
-			return null;
-		}
-*/
 
-		//result = krollBridge.evalFile(filename);
+		String code = KrollAssetHelper.readAsset(filename);
+		result = KrollRuntime.getInstance().evalString(code, filename);
+
 		if (messenger != null) {
 			try {
 				Message msg = Message.obtain();
 				msg.what = messageId;
 				messenger.send(msg);
-				if (DBG) {
-					Log.d(LCAT, "Notifying caller that evalFile has completed");
-				}
+				Log.d(TAG, "Notifying caller that evalFile has completed", Log.DEBUG_MODE);
 			} catch(RemoteException e) {
-				Log.w(LCAT, "Failed to notify caller that eval completed");
+				Log.w(TAG, "Failed to notify caller that eval completed");
 			}
 		}
 		if (setUrlBackTo != null) { this.currentUrl = setUrlBackTo; }
 		return result;
 	}
 
+	/**
+	 * @deprecated
+	 * @see KrollRuntime#evalString(String)
+	 */
 	public Object evalFile(String filename)
 		throws IOException
 	{
 		return evalFile(filename, null, -1);
 	}
 
+	/**
+	 * @deprecated
+	 * @see KrollRuntime#evalString(String)
+	 * @param src Javascript code
+	 * @return the return value of the passed in {@link code}
+	 */
 	public Object evalJS(String src)
 	{
-/*
-		if (krollBridge == null)
-		{
-			Log.e(LCAT,"on evalJS, evaluator is null and shouldn't be");
-		}
-		return krollBridge.evalJS(src);
-*/
-		return null;
+		return KrollRuntime.getInstance().evalString(src);
 	}
-
-/*
-	public Scriptable getScope()
-	{
-		if (krollBridge != null) {
-			return krollBridge.getScope();
-		}
-		return null;
-	}
-*/
 
 	public void addOnLifecycleEventListener(OnLifecycleEvent listener)
 	{
 		lifecycleListeners.add(new WeakReference<OnLifecycleEvent>(listener));
 	}
 
-	public void addOnServiceLifecycleEventListener(OnServiceLifecycleEvent listener)
-	{
-		serviceLifecycleListeners.add(new WeakReference<OnServiceLifecycleEvent>(listener));
-	}
-
 	public void removeOnLifecycleEventListener(OnLifecycleEvent listener)
 	{
 		lifecycleListeners.remove(listener);
-	}
-
-	public void removeOnServiceLifecycleEventListener(OnServiceLifecycleEvent listener)
-	{
-		serviceLifecycleListeners.remove(listener);
 	}
 
 	public void fireLifecycleEvent(Activity activity, int which)
@@ -257,7 +204,7 @@ public class TiContext// implements ErrorReporter
 				try {
 					fireLifecycleEvent(activity, listener, which);
 				} catch (Throwable t) {
-					Log.e(LCAT, "Error dispatching lifecycle event: " + t.getMessage(), t);
+					Log.e(TAG, "Error dispatching lifecycle event: " + t.getMessage(), t);
 				}
 			}
 		}
@@ -274,37 +221,16 @@ public class TiContext// implements ErrorReporter
 		}
 	}
 
-	public void dispatchOnServiceDestroy(Service service)
-	{
-		synchronized (serviceLifecycleListeners) {
-			for (OnServiceLifecycleEvent listener : serviceLifecycleListeners.nonNull()) {
-				try {
-					listener.onDestroy(service);
-				} catch (Throwable t) {
-					Log.e(LCAT, "Error dispatching service onDestroy  event: " + t.getMessage(), t);
-				}
-			}
-		}
-	}
-
-	//@Override
 	public void error(String message, String sourceName, int line, String lineSource, int lineOffset)
 	{
-		//TiJSErrorDialog.openErrorDialog(this, getActivity(), "Error", message, sourceName, line, lineSource, lineOffset);
 	}
 
-	//@Override
 	public void runtimeError(String message, String sourceName, int line, String lineSource, int lineOffset)
-	//public EvaluatorException runtimeError(String message, String sourceName, int line, String lineSource, int lineOffset)
 	{
-		//TiJSErrorDialog.openErrorDialog(this, getActivity(), "Runtime Error", message, sourceName, line, lineSource, lineOffset);
-		//return new EvaluatorException(message, sourceName, line, lineSource, lineOffset);
 	}
 
-	//@Override
 	public void warning(String message, String sourceName, int line, String lineSource, int lineOffset)
 	{
-		//TiJSErrorDialog.openErrorDialog(this, getActivity(), "Warning", message, sourceName, line, lineSource, lineOffset);
 	}
 
 	public static TiContext createTiContext(Activity activity, String baseUrl)
@@ -314,14 +240,7 @@ public class TiContext// implements ErrorReporter
 
 	public static TiContext createTiContext(Activity activity, String baseUrl, String loadFile)
 	{
-		TiContext tic = new TiContext(activity, baseUrl);
-/*
-		KrollContext kroll = KrollContext.createContext(tic, loadFile);
-		tic.setKrollContext(kroll);
-		KrollBridge krollBridge = new KrollBridge(kroll);
-		tic.setKrollBridge(krollBridge);
-*/
-		return tic;
+		return new TiContext(activity, baseUrl);
 	}
 
 	public KrollContext getKrollContext()
@@ -336,42 +255,13 @@ public class TiContext// implements ErrorReporter
 
 	public static TiContext getCurrentTiContext()
 	{
-		/*
-		KrollContext currentCtx = KrollContext.getCurrentKrollContext();
-		if (currentCtx == null) {
-			return null;
-		}
-		return currentCtx.getTiContext();
-		*/
 		return new TiContext(null, "");
 	}
 
 	public void release()
 	{
-		/*
-		if (krollBridge != null) {
-			krollBridge.release();
-			krollBridge = null;
-		}
-		*/
 		if (lifecycleListeners != null) {
 			lifecycleListeners.clear();
-		}
-		if (serviceLifecycleListeners != null) {
-			serviceLifecycleListeners.clear();
-		}
-	}
-
-	public boolean isServiceContext() 
-	{
-		return serviceContext;
-	}
-
-	public void setServiceContext(boolean value)
-	{
-		serviceContext = true;
-		if (value && serviceLifecycleListeners == null ) {
-			serviceLifecycleListeners = new TiWeakList<OnServiceLifecycleEvent>(true);
 		}
 	}
 

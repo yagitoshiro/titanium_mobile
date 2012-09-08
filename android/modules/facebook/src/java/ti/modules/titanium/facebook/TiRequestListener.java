@@ -14,9 +14,12 @@ import java.net.MalformedURLException;
 import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.KrollFunction;
 import org.appcelerator.kroll.common.Log;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import com.facebook.android.AsyncFacebookRunner.RequestListener;
 import com.facebook.android.FacebookError;
+import com.facebook.android.Util;
 
 public class TiRequestListener implements RequestListener
 {
@@ -80,31 +83,38 @@ public class TiRequestListener implements RequestListener
 
 	// AsyncFacebookRunner.RequestListener implementation
 	@Override
-	public void onComplete(String result)
+	public void onComplete(String result, Object state)
 	{
-		complete(result);
+		try {
+			Util.parseJson(result);
+			complete(result);
+		} catch (JSONException e) {
+			complete(result);
+		} catch (FacebookError e) {
+			complete(e);
+		}
 	}
 
 	@Override
-	public void onFacebookError(FacebookError e)
-	{
-		complete(e);
-	}
-
-	@Override
-	public void onFileNotFoundException(FileNotFoundException e)
-	{
-		complete(e);
-	}
-
-	@Override
-	public void onIOException(IOException e)
+	public void onFacebookError(FacebookError e, Object state)
 	{
 		complete(e);
 	}
 
 	@Override
-	public void onMalformedURLException(MalformedURLException e)
+	public void onFileNotFoundException(FileNotFoundException e, Object state)
+	{
+		complete(e);
+	}
+
+	@Override
+	public void onIOException(IOException e, Object state)
+	{
+		complete(e);
+	}
+
+	@Override
+	public void onMalformedURLException(MalformedURLException e, Object state)
 	{
 		complete(e);
 	}

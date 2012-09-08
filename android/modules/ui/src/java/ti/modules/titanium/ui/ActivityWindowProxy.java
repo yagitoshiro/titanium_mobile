@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -9,7 +9,6 @@ package ti.modules.titanium.ui;
 import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.annotations.Kroll;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.titanium.TiActivityWindow;
 import org.appcelerator.titanium.TiActivityWindows;
 import org.appcelerator.titanium.TiApplication;
@@ -29,8 +28,7 @@ import android.os.Messenger;
 @Kroll.proxy(creatableInModule=UIModule.class)
 public class ActivityWindowProxy extends TiWindowProxy
 {
-	private static final String LCAT = "ActivityWindowProxy";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "ActivityWindowProxy";
 	private static final int MSG_FIRST_ID = TiWindowProxy.MSG_LAST_ID + 1;
 	private static final int MSG_FINISH_OPEN = MSG_FIRST_ID + 100;
 
@@ -86,7 +84,6 @@ public class ActivityWindowProxy extends TiWindowProxy
 
 				opened = true;
 				handlePostOpen();
-				fireEvent(TiC.EVENT_OPEN, null);
 
 				return true;
 			}
@@ -99,9 +96,7 @@ public class ActivityWindowProxy extends TiWindowProxy
 	@Override
 	protected void handleOpen(KrollDict options)
 	{
-		if (DBG) {
-			Log.d(LCAT, "handleOpen");
-		}
+		Log.d(TAG, "handleOpen", Log.DEBUG_MODE);
 
 		Messenger messenger = new Messenger(getMainHandler());
 
@@ -116,7 +111,7 @@ public class ActivityWindowProxy extends TiWindowProxy
 		}
 	}
 
-	public void fillIntentForTab(Intent intent)
+	public void fillIntentForTab(Intent intent, TabProxy tab)
 	{
 		intent.putExtra(TiC.INTENT_PROPERTY_USE_ACTIVITY_WINDOW, true);
 
@@ -124,13 +119,20 @@ public class ActivityWindowProxy extends TiWindowProxy
 			@Override
 			public void windowCreated(TiBaseActivity activity)
 			{
+				// This is the callback when a window associated with a tab is created.
+				// Since TiUIActivityWindow.bindProxies isn't called here, 
+				// we call setWindowProxy directly to make sure the activity->window
+				// association is correctly initialized.
+				activity.setWindowProxy(ActivityWindowProxy.this);
 				view = new TiUIActivityWindow(ActivityWindowProxy.this, activity);
+
 				realizeViews(view);
 				opened = true;
-				fireEvent(TiC.EVENT_OPEN, null);
+				fireEvent(TiC.EVENT_OPEN, null, false);
 			}
 		});
 
+		tab.setWindowId(windowId);
 		intent.putExtra(TiC.INTENT_PROPERTY_WINDOW_ID, windowId);
 		intent.putExtra(TiC.INTENT_PROPERTY_IS_TAB, true);
 	}
@@ -138,17 +140,13 @@ public class ActivityWindowProxy extends TiWindowProxy
 	@Override
 	protected void handleClose(KrollDict options)
 	{
-		if (DBG) {
-			Log.d(LCAT, "handleClose");
-		}
+		Log.d(TAG, "handleClose", Log.DEBUG_MODE);
 
 		TiUIActivityWindow window = getWindow();
 
 		if (window != null) {
 			window.close(options);
 		}
-
-		releaseViews();
 	}
 
 	@Kroll.getProperty @Kroll.method
@@ -204,8 +202,13 @@ public class ActivityWindowProxy extends TiWindowProxy
 	*/
 
 	@Override
-	protected Activity handleGetActivity() 
+	protected Activity getWindowActivity() 
 	{
-		return getActivity();
+		TiUIActivityWindow window = getWindow();
+		if (window != null) {
+			return window.getActivity();
+		}
+
+		return null;
 	}
 }

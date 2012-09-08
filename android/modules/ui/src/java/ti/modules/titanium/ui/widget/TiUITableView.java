@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -9,7 +9,6 @@ package ti.modules.titanium.ui.widget;
 import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.titanium.TiBaseActivity;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.TiDimension;
@@ -32,8 +31,7 @@ import android.widget.RelativeLayout;
 public class TiUITableView extends TiUIView
 	implements OnItemClickedListener, OnItemLongClickedListener, OnLifecycleEvent
 {
-	private static final String LCAT = "TitaniumTableView";	
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TitaniumTableView";
 
 	protected TiTableView tableView;
 
@@ -80,6 +78,11 @@ public class TiUITableView extends TiUIView
 	{
 		tableView.getListView().setSelectionFromTop(index, 0);
 	}
+	
+	public void selectRow(final int row_id)
+	{
+		tableView.getListView().setSelection(row_id);
+	}
 
 	public TiTableView getTableView()
 	{
@@ -90,11 +93,14 @@ public class TiUITableView extends TiUIView
 	{
 		return tableView.getListView();
 	}
-
+	
 	@Override
 	public void processProperties(KrollDict d)
 	{
-		tableView = new TiTableView((TableViewProxy) proxy);
+		// Don't create a new table view if one already exists
+		if (tableView == null) {
+			tableView = new TiTableView((TableViewProxy) proxy);
+		}
 		Activity activity = proxy.getActivity();
 		if (activity instanceof TiBaseActivity) {
 			((TiBaseActivity) activity).addOnLifecycleEventListener(this);
@@ -174,6 +180,13 @@ public class TiUITableView extends TiUIView
 	@Override
 	public void release()
 	{
+		// Release search bar if there is one
+		if (nativeView instanceof RelativeLayout) {
+			((RelativeLayout) nativeView).removeAllViews();
+			TiViewProxy searchView = (TiViewProxy) (proxy.getProperty(TiC.PROPERTY_SEARCH));
+			searchView.release();
+		}
+
 		if (tableView != null) {
 			tableView.release();
 			tableView  = null;
@@ -188,13 +201,16 @@ public class TiUITableView extends TiUIView
 	@Override
 	public void propertyChanged(String key, Object oldValue, Object newValue, KrollProxy proxy)
 	{
-		if (DBG) {
-			Log.d(LCAT, "Property: " + key + " old: " + oldValue + " new: " + newValue);
-		}
+		Log.d(TAG, "Property: " + key + " old: " + oldValue + " new: " + newValue, Log.DEBUG_MODE);
 		if (key.equals(TiC.PROPERTY_SEPARATOR_COLOR)) {
 			tableView.setSeparatorColor(TiConvert.toString(newValue));
 		} else {
 			super.propertyChanged(key, oldValue, newValue, proxy);
 		}
+	}
+
+	@Override
+	public void registerForTouch() {
+		registerForTouch(tableView.getListView());
 	}
 }

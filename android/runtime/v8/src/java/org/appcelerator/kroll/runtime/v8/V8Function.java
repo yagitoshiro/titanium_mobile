@@ -1,10 +1,9 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2011-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
-
 package org.appcelerator.kroll.runtime.v8;
 
 import java.util.HashMap;
@@ -17,41 +16,45 @@ import org.appcelerator.kroll.common.TiMessenger;
 
 import android.os.Handler;
 import android.os.Message;
+import android.util.Log;
 
 
 public class V8Function extends V8Object implements KrollFunction, Handler.Callback
 {
-	private Handler handler;
+	private static final String TAG = "V8Function";
 
 	protected static final int MSG_CALL_SYNC = V8Object.MSG_LAST_ID + 100;
 	protected static final int MSG_LAST_ID = MSG_CALL_SYNC;
 
-
 	public V8Function(long pointer)
 	{
 		super(pointer);
-		handler = new Handler(TiMessenger.getRuntimeMessenger().getLooper(), this);
 	}
 
-	public void call(KrollObject krollObject, HashMap args)
+	public Object call(KrollObject krollObject, HashMap args)
 	{
-		call(krollObject, new Object[] { args });
+		return call(krollObject, new Object[] { args });
 	}
 
-	public void call(KrollObject krollObject, Object[] args)
+	public Object call(KrollObject krollObject, Object[] args)
 	{
 		if (KrollRuntime.getInstance().isRuntimeThread())
 		{
-			callSync(krollObject, args);
+			return callSync(krollObject, args);
 
 		} else {
-			TiMessenger.sendBlockingRuntimeMessage(handler.obtainMessage(MSG_CALL_SYNC), new FunctionArgs(krollObject, args));
+			return TiMessenger.sendBlockingRuntimeMessage(handler.obtainMessage(MSG_CALL_SYNC), new FunctionArgs(
+				krollObject, args));
 		}
 	}
 
-	public void callSync(KrollObject krollObject, Object[] args)
+	public Object callSync(KrollObject krollObject, Object[] args)
 	{
-		nativeInvoke(((V8Object) krollObject).getPointer(), getPointer(), args);
+		if (!KrollRuntime.isInitialized()) {
+			Log.w(TAG, "Runtime disposed, cannot call function.");
+			return null;
+		}
+		return nativeInvoke(((V8Object) krollObject).getPointer(), getPointer(), args);
 	}
 
 	public void callAsync(KrollObject krollObject, HashMap args)
@@ -69,24 +72,40 @@ public class V8Function extends V8Object implements KrollFunction, Handler.Callb
 		});
 	}
 
+	@Override
 	public boolean handleMessage(Message message)
 	{
 		switch (message.what) {
 			case MSG_CALL_SYNC: {
 				AsyncResult asyncResult = ((AsyncResult) message.obj);
 				FunctionArgs functionArgs = (FunctionArgs) asyncResult.getArg();
-				callSync(functionArgs.krollObject, functionArgs.args);
-				asyncResult.setResult(null);
+				asyncResult.setResult(callSync(functionArgs.krollObject, functionArgs.args));
 
 				return true;
 			}
 		}
 
-		return false;
+		return super.handleMessage(message);
 	}
 
+	@Override
+	public void doRelease() {
+		long functionPointer = getPointer();
+		if (functionPointer == 0) {
+			return;
+		}
+
+		nativeRelease(functionPointer);
+		KrollRuntime.suggestGC();
+	}
+
+	@Override
+	protected void finalize() throws Throwable {
+		super.finalize();
+	}
 
 	// JNI method prototypes
-	private native void nativeInvoke(long thisPointer, long functionPointer, Object[] functionArgs);
+	private native Object nativeInvoke(long thisPointer, long functionPointer, Object[] functionArgs);
+	private static native void nativeRelease(long functionPointer);
 }
 

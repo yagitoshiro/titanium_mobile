@@ -11,19 +11,29 @@
 #import "TiUtils.h"
 
 @implementation TiDOMNodeListProxy
-@synthesize document;
 
 -(void)dealloc
 {
-	RELEASE_TO_NIL(nodes);
-	RELEASE_TO_NIL(document);
+	[nodes release];
 	[super dealloc];
 }
 
 -(void)setNodes:(NSArray*)nodes_
 {
-	RELEASE_TO_NIL(nodes);
+    if (nodes == nodes_) {
+        return;
+    }
+    for (TiDOMNodeProxy *node in nodes) {
+        if (![nodes_ containsObject:node]) {
+            [self forgetProxy:node];
+        }
+    }
+	[nodes release];
 	nodes = [nodes_ retain];
+    for (TiDOMNodeProxy *node in nodes) {
+        [[self pageContext] registerProxy:node];
+        [self rememberProxy:node];
+    }
 }
 
 -(id)item:(id)args
@@ -31,12 +41,9 @@
 	ENSURE_SINGLE_ARG(args,NSObject);
 	int index = [TiUtils intValue:args];
     
-	if (index < [nodes count])
+	if ( (index < [nodes count]) && (index >=0) )
 	{
-		id context = ([self executionContext]==nil)?[self pageContext]:[self executionContext];
-		id result = [TiDOMNodeProxy makeNode:[nodes objectAtIndex:index] context:context];
-		[result setDocument:[self document]];
-		return result;
+		return [nodes objectAtIndex:index];
 	}
 	return [NSNull null];
 }
@@ -45,6 +52,8 @@
 {
     return NUMINT([nodes count]);
 }
+
+
 
 @end
 

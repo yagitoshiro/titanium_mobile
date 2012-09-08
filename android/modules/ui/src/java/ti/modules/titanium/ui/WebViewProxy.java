@@ -1,14 +1,18 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
 package ti.modules.titanium.ui;
 
+import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.annotations.Kroll;
+import org.appcelerator.kroll.common.Log;
+import org.appcelerator.titanium.TiBaseActivity;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.TiContext;
+import org.appcelerator.titanium.TiLifecycle.OnLifecycleEvent;
 import org.appcelerator.titanium.util.TiConvert;
 import org.appcelerator.titanium.view.TiUIView;
 
@@ -16,15 +20,18 @@ import ti.modules.titanium.ui.widget.webview.TiUIWebView;
 import android.app.Activity;
 import android.os.Handler;
 import android.os.Message;
+import android.webkit.WebView;
 
 @Kroll.proxy(creatableInModule=UIModule.class, propertyAccessors = {
 	TiC.PROPERTY_DATA,
+	TiC.PROPERTY_ON_CREATE_WINDOW,
 	TiC.PROPERTY_SCALES_PAGE_TO_FIT,
 	TiC.PROPERTY_URL
 })
-public class WebViewProxy extends ViewProxy
-	implements Handler.Callback
+public class WebViewProxy extends ViewProxy 
+	implements Handler.Callback, OnLifecycleEvent
 {
+	private static final String TAG = "WebViewProxy";
 	private static final int MSG_FIRST_ID = ViewProxy.MSG_LAST_ID + 1;
 
 	private static final int MSG_GO_BACK = MSG_FIRST_ID + 101;
@@ -36,6 +43,8 @@ public class WebViewProxy extends ViewProxy
 	private static String fusername;
 	private static String fpassword;
 
+	private Message postCreateMessage;
+	
 	public WebViewProxy()
 	{
 		super();
@@ -49,27 +58,53 @@ public class WebViewProxy extends ViewProxy
 	@Override
 	public TiUIView createView(Activity activity)
 	{
+		((TiBaseActivity)activity).addOnLifecycleEventListener(this);
 		TiUIWebView webView = new TiUIWebView(this);
 		webView.focus();
+
+		if (postCreateMessage != null) {
+			sendPostCreateMessage(webView.getWebView(), postCreateMessage);
+			postCreateMessage = null;
+		}
+
 		return webView;
 	}
 
-	public TiUIWebView getWebView() {
+	public TiUIWebView getWebView()
+	{
 		return (TiUIWebView) getOrCreateView();
 	}
 
 	@Kroll.method
-	public Object evalJS(String code) {
-		return getWebView().getJSValue(code);
+	public Object evalJS(String code)
+	{
+		// If the view doesn't even exist yet,
+		// or if it once did exist but doesn't anymore
+		// (like if the proxy was removed from a parent),
+		// we absolutely should not try to get a JS value
+		// from it.
+		TiUIWebView view = (TiUIWebView) peekView();
+		if (view == null) {
+			Log.w(TAG, "WebView not available, returning null for evalJS result.");
+			return null;
+		}
+		return view.getJSValue(code);
 	}
 
 	@Kroll.method @Kroll.getProperty
 	public String getHtml()
 	{
 		if (!hasProperty(TiC.PROPERTY_HTML)) {
-			return "";
+			return getWebView().getJSValue("document.documentElement.outerHTML");
 		}
 		return (String) getProperty(TiC.PROPERTY_HTML);
+	}
+	
+	@Kroll.method
+	public void setHtml(String html, @Kroll.argument(optional=true)KrollDict d)
+	{
+		setProperty(TiC.PROPERTY_HTML, html);
+		getWebView().setHtml(html, d);
 	}
 
 	@Override
@@ -141,29 +176,29 @@ public class WebViewProxy extends ViewProxy
 		}
 		return false;
 	}
-	
+
 	@Kroll.method
-	public void goBack() {
+	public void goBack()
+	{
 		getMainHandler().sendEmptyMessage(MSG_GO_BACK);
-		//getUIHandler().sendEmptyMessage(MSG_GO_BACK);
 	}
 
 	@Kroll.method
-	public void goForward() {
+	public void goForward()
+	{
 		getMainHandler().sendEmptyMessage(MSG_GO_FORWARD);
-		//getUIHandler().sendEmptyMessage(MSG_GO_FORWARD);
 	}
 
 	@Kroll.method
-	public void reload() {
+	public void reload()
+	{
 		getMainHandler().sendEmptyMessage(MSG_RELOAD);
-		//getUIHandler().sendEmptyMessage(MSG_RELOAD);
 	}
 
 	@Kroll.method
-	public void stopLoading() {
+	public void stopLoading()
+	{
 		getMainHandler().sendEmptyMessage(MSG_STOP_LOADING);
-		//getUIHandler().sendEmptyMessage(MSG_STOP_LOADING);
 	}
 
 	@Kroll.method @Kroll.getProperty
@@ -240,6 +275,75 @@ public class WebViewProxy extends ViewProxy
 	public String getBasicAuthenticationPassword()
 	{
 		return fpassword;
+	}
+
+	public void setPostCreateMessage(Message postCreateMessage)
+	{
+		if (view != null) {
+			sendPostCreateMessage(getWebView().getWebView(), postCreateMessage);
+		} else {
+			this.postCreateMessage = postCreateMessage;
+		}
+	}
+
+	private static void sendPostCreateMessage(WebView view, Message postCreateMessage)
+	{
+		WebView.WebViewTransport transport = (WebView.WebViewTransport) postCreateMessage.obj;
+		if (transport != null) {
+			transport.setWebView(view);
+		}
+		postCreateMessage.sendToTarget();
+	}
+
+	/**
+	 * Don't release the web view when it's removed. TIMOB-7808
+	 */
+	@Override
+	public void releaseViews()
+	{
+	}
+
+	@Kroll.method
+	public void release()
+	{
+		super.releaseViews();
+	}
+
+	@Override
+	public void onStart(Activity activity) {
+	}
+
+	@Override
+	public void onResume(Activity activity) {
+	}
+
+	@Override
+	public void onPause(Activity activity) {
+	}
+
+	@Override
+	public void onStop(Activity activity) {
+	}
+
+	@Override
+	public void onDestroy(Activity activity) {
+		TiUIWebView webView = (TiUIWebView) peekView();
+		if (webView == null) {
+			return;
+		}
+
+		// We allow JS polling to continue until we exit the app. If we want to stop the polling when the app is
+		// backgrounded, we would need to move this to onStop(), and add the appropriate logic in onResume() to restart
+		// the polling.
+		webView.destroyWebViewBinding();
+
+		WebView nativeWebView = webView.getWebView();
+		if (nativeWebView == null) {
+			return;
+		}
+
+		nativeWebView.stopLoading();
+		super.releaseViews();
 	}
 
 }

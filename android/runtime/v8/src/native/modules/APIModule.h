@@ -29,10 +29,16 @@ public:
 	static Handle<Value> logFatal(const Arguments& args);
 	static Handle<Value> log(const Arguments& args);
 
+	// Only used by debugger for terminating application.
+	static Handle<Value> terminate(const Arguments& args);
+
+	// Schedule a debugger break next time JavaScript code runs.
+	static Handle<Value> debugBreak(const Arguments& args);
 
 private:
 	static void logInternal(int logLevel, const char *messageTag, const char *message);
 	static Persistent<FunctionTemplate> constructorTemplate;
+    static Handle<Value> combineLogMessages(const Arguments& args, int startIndex=0);
 };
 }
 

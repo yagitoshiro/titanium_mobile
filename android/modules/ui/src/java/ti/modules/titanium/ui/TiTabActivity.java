@@ -1,20 +1,26 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
 package ti.modules.titanium.ui;
 
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.KrollRuntime;
 import org.appcelerator.kroll.common.Log;
+import org.appcelerator.titanium.TiActivityWindows;
 import org.appcelerator.titanium.TiApplication;
+import org.appcelerator.titanium.TiBaseActivity;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.TiRootActivity;
+import org.appcelerator.titanium.util.TiUIHelper;
 import org.appcelerator.titanium.view.TiCompositeLayout;
 import org.appcelerator.titanium.view.TiCompositeLayout.LayoutArrangement;
 
 import android.app.TabActivity;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -29,7 +35,7 @@ import android.widget.TabHost.TabContentFactory;
 
 public class TiTabActivity extends TabActivity
 {
-	private static final String LCAT = "TiTabActivity";
+	private static final String TAG = "TiTabActivity";
 
 	protected TabGroupProxy proxy;
 	protected Handler handler;
@@ -44,7 +50,30 @@ public class TiTabActivity extends TabActivity
 	@Override
 	protected void onCreate(Bundle savedInstanceState)
 	{
+		TiApplication tiApp = getTiApp();
+
+		if (tiApp.isRestartPending()) {
+			super.onCreate(savedInstanceState);
+			if (!isFinishing()) {
+				finish();
+			}
+			return;
+		}
+
+		if (TiBaseActivity.isUnsupportedReLaunch(this, savedInstanceState)) {
+			Log.w(TAG, "Unsupported, out-of-order activity creation. Finishing.");
+			super.onCreate(savedInstanceState);
+			tiApp.scheduleRestart(250);
+			finish();
+			return;
+		}
+
+		TiApplication.addToActivityStack(this);
+		KrollRuntime.incrementActivityRefCount();
+
 		super.onCreate(savedInstanceState);
+
+
 		int layoutResId = getResources().getIdentifier("titanium_tabgroup", "layout", getPackageName());
 		if (layoutResId == 0) {
 			throw new IllegalStateException("titanium_tabgroup layout resource not found.  TabGroup cannot be created.");
@@ -59,7 +88,7 @@ public class TiTabActivity extends TabActivity
 		TiCompositeLayout.LayoutParams tabHostLayout = new TiCompositeLayout.LayoutParams();
 		tabHostLayout.autoFillsHeight = true;
 		tabHostLayout.autoFillsWidth = true;
-		TiCompositeLayout layout = new TiCompositeLayout(this, LayoutArrangement.DEFAULT);
+		TiCompositeLayout layout = new TiCompositeLayout(this, LayoutArrangement.DEFAULT, proxy);
 		layout.addView(tabHost, tabHostLayout);
 
 		boolean fullscreen = false;
@@ -135,20 +164,19 @@ public class TiTabActivity extends TabActivity
 						msg.obj = me;
 						if (fMessenger.getBinder().pingBinder()) {
 							fMessenger.send(msg);
-							Log.w(LCAT, "Notifying TiTabGroup, activity is created");
+							Log.d(TAG, "Notifying TiTabGroup, activity is created", Log.DEBUG_MODE);
 						} else {
 							me.finish();
 						}
 					} catch (RemoteException e) {
-						Log.e(LCAT, "Unable to message creator. finishing.");
+						Log.e(TAG, "Unable to message creator. finishing.");
 						me.finish();
 					} catch (RuntimeException e) {
-						Log.w(LCAT, "Run-time exception: " + e.getMessage(), e);
+						Log.w(TAG, "Run-time exception: " + e.getMessage(), e);
 					}
 				}
 			}
 		});
-		
 	}
 
 	public TiApplication getTiApp()
@@ -159,6 +187,12 @@ public class TiTabActivity extends TabActivity
 	@Override
 	public void finish()
 	{
+		if (proxy != null) {
+			KrollDict data = new KrollDict();
+			data.put(TiC.EVENT_PROPERTY_SOURCE, proxy);
+			proxy.fireSyncEvent(TiC.EVENT_CLOSE, data);
+		}
+
 		if (shouldFinishRootActivity()) {
 			if (getApplication() != null) {
 				TiApplication tiApp = getTiApp();
@@ -177,20 +211,60 @@ public class TiTabActivity extends TabActivity
 	protected void onPause()
 	{
 		super.onPause();
-		((TiApplication) getApplication()).setCurrentActivity(this, null);
+
+		TiApplication tiApp = getTiApp();
+
+		if (tiApp.isRestartPending()) {
+			if (!isFinishing()) {
+				finish();
+			}
+			return;
+		}
+		TiUIHelper.showSoftKeyboard(getWindow().getDecorView(), false);
+		tiApp.setCurrentActivity(this, null);
 	}
+
 
 	@Override
 	protected void onResume()
 	{
 		super.onResume();
-		((TiApplication) getApplication()).setCurrentActivity(this, this);
+
+		TiApplication tiApp = getTiApp();
+
+		if (tiApp.isRestartPending()) {
+			if (!isFinishing()) {
+				finish();
+			}
+			return;
+		}
+
+		tiApp.setCurrentActivity(this, this);
+	}
+
+	@Override
+	protected void onStop()
+	{
+		super.onStop();
+		KrollRuntime.suggestGC();
 	}
 
 	@Override
 	protected void onDestroy()
 	{
+		TiApplication.removeFromActivityStack(this);
 		super.onDestroy();
+
+		TiApplication tiApp = getTiApp();
+
+		if (tiApp.isRestartPending()) {
+			if (!isFinishing()) {
+				finish();
+			}
+			return;
+		}
+		
+
 		if (!isFinishing())
 		{
 			// Our Activities are currently unable to recover from Android-forced restarts,
@@ -206,13 +280,33 @@ public class TiTabActivity extends TabActivity
 			finish();
 			return;
 		}
+
 		if (proxy != null) {
+			//Remove activityWindows reference from tabs. ActivityWindow reference is only removed when a tab is created (but is added when a tab is added to a tabGroup).
+			//Furthermore, when a tabGroup opens, only the current tab is created (the rest won't create until clicked on). This introduces a memory leak when we have multiple tabs,
+			//and attempt to open/close tabGroup without navigating through all the tabs.
+			TabProxy[] tabs = proxy.getTabs();
+			if (tabs != null) {
+				for (int i = 0; i < tabs.length; ++i) {
+					TiActivityWindows.removeWindow(tabs[i].getWindowId());
+				}
+			}
+
 			proxy.closeFromActivity();
 			proxy = null;
 		}
-		
+
+		KrollRuntime.decrementActivityRefCount();
+		KrollRuntime.suggestGC();
 		handler = null;
 	}
+
+	public void onConfigurationChanged(Configuration newConfig)
+	{
+		super.onConfigurationChanged(newConfig);
+		TiBaseActivity.callOrientationChangedListener(newConfig);
+	}
+	
 	private boolean shouldFinishRootActivity()
 	{
 		Intent intent = getIntent();

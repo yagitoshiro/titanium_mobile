@@ -1,10 +1,9 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
-
 package ti.modules.titanium.contacts;
 
 import java.util.Calendar;
@@ -18,7 +17,6 @@ import org.appcelerator.kroll.KrollModule;
 import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.kroll.annotations.Kroll;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.titanium.ContextSpecific;
 import org.appcelerator.titanium.TiApplication;
 import org.appcelerator.titanium.TiContext;
@@ -32,8 +30,7 @@ import android.content.Intent;
 public class ContactsModule extends KrollModule
 		implements TiActivityResultHandler
 {
-	private static final String LCAT = "TiContacts";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TiContacts";
 	
 	@Kroll.constant public static final int CONTACTS_KIND_ORGANIZATION = 0;
 	@Kroll.constant public static final int CONTACTS_KIND_PERSON = 1;
@@ -74,10 +71,14 @@ public class ContactsModule extends KrollModule
 		
 		Calendar end = Calendar.getInstance();
 		long elapsed = end.getTimeInMillis() - start.getTimeInMillis();
-		if (DBG) {
-			Log.d(LCAT, "getAllPersons elapsed: " + elapsed + " milliseconds"); 
-		}
+		Log.d(TAG, "getAllPersons elapsed: " + elapsed + " milliseconds", Log.DEBUG_MODE);
 		return persons;
+	}
+	
+	@Kroll.method
+	public PersonProxy createPerson(KrollDict options)
+	{
+		return contactsApi.addContact(options);
 	}
 	
 	@Kroll.method
@@ -87,15 +88,36 @@ public class ContactsModule extends KrollModule
 	}
 	
 	@Kroll.method
+	public void save (KrollDict people) 
+	{
+		contactsApi.save(people);
+	}
+	
+	@Kroll.method
 	public PersonProxy getPersonByID(long id)
 	{
 		return contactsApi.getPersonById(id);
 	}
 	
 	@Kroll.method
+	public void removePerson(PersonProxy person)
+	{
+		contactsApi.removePerson(person);
+	}
+	
+	@Kroll.method
 	public void showContacts(@Kroll.argument(optional=true) KrollDict d)
 	{
-		Activity launchingActivity = TiApplication.getInstance().getRootActivity();
+		if (TiApplication.getInstance() == null) {
+			Log.e(TAG, "Could not showContacts, application is null", Log.DEBUG_MODE);
+			return;
+		}
+		
+		Activity launchingActivity = TiApplication.getInstance().getCurrentActivity();
+		if (launchingActivity == null) {
+			Log.e(TAG, "Could not showContacts, current activity is null., Log.DEBUG_MODE");
+			return;
+		}
 		
 		/*
 		if (launchingActivity == null) { // Not sure if that's even possible
@@ -103,9 +125,7 @@ public class ContactsModule extends KrollModule
 		}*/
 
 		Intent intent = contactsApi.getIntentForContactsPicker();
-		if (DBG) {
-			Log.d(LCAT, "Launching content picker activity");
-		}
+		Log.d(TAG, "Launching content picker activity", Log.DEBUG_MODE);
 		
 		int requestCode = requestCodeGen.getAndIncrement();
 		
@@ -139,7 +159,7 @@ public class ContactsModule extends KrollModule
 	@Override
 	public void onError(Activity activity, int requestCode, Exception e)
 	{
-		Log.e(LCAT, "Error from contact picker activity: " + e.getMessage(), e);
+		Log.e(TAG, "Error from contact picker activity: " + e.getMessage(), e);
 	}
 
 	@Override
@@ -149,9 +169,7 @@ public class ContactsModule extends KrollModule
 		Integer rcode = new Integer(requestCode);
 		if (requests.containsKey(rcode)) {
 			Map<String, KrollFunction> request = requests.get(rcode);
-			if (DBG) {
-				Log.d(LCAT, "Received result from contact picker.  Result code: " + resultCode);
-			}
+			Log.d(TAG, "Received result from contact picker.  Result code: " + resultCode, Log.DEBUG_MODE);
 			if (resultCode == Activity.RESULT_CANCELED) {
 				if (request.containsKey("cancel")) {
 					KrollFunction callback = request.get("cancel");
@@ -170,13 +188,12 @@ public class ContactsModule extends KrollModule
 					}
 				}
 			} else {
-				Log.w(LCAT, "Result code from contact picker activity not understood: " + resultCode);
+				Log.w(TAG, "Result code from contact picker activity not understood: " + resultCode);
 			}
-			
+
 			// Teardown the request -- it's a one timer.
 			request.clear();
 			requests.remove(rcode);
 		}
 	}
-	
 }

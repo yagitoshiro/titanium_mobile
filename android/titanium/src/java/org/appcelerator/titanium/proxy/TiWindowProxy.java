@@ -1,11 +1,9 @@
 /**
-
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
-
 package org.appcelerator.titanium.proxy;
 
 import java.lang.ref.WeakReference;
@@ -16,7 +14,6 @@ import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.kroll.annotations.Kroll;
 import org.appcelerator.kroll.common.AsyncResult;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.kroll.common.TiMessenger;
 import org.appcelerator.titanium.TiApplication;
 import org.appcelerator.titanium.TiBaseActivity;
@@ -32,6 +29,7 @@ import android.content.pm.ActivityInfo;
 import android.graphics.PixelFormat;
 import android.os.Build;
 import android.os.Message;
+import android.view.View;
 
 @Kroll.proxy(propertyAccessors={
 	TiC.PROPERTY_EXIT_ON_CLOSE,
@@ -45,8 +43,7 @@ import android.os.Message;
 })
 public abstract class TiWindowProxy extends TiViewProxy
 {
-	private static final String LCAT = "TiWindowProxy";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TiWindowProxy";
 	
 	private static final int MSG_FIRST_ID = KrollProxy.MSG_LAST_ID + 1;
 	private static final int MSG_OPEN = MSG_FIRST_ID + 100;
@@ -65,6 +62,7 @@ public abstract class TiWindowProxy extends TiViewProxy
 	protected TiViewProxy tab;
 	protected boolean inTab;
 	protected PostOpenListener postOpenListener;
+	protected boolean windowActivityCreated = false;
 
 
 	public static interface PostOpenListener
@@ -151,7 +149,6 @@ public abstract class TiWindowProxy extends TiViewProxy
 	@Kroll.method
 	public void close(@Kroll.argument(optional = true) Object arg)
 	{
-		if (!opened) { return; }
 
 		KrollDict options = null;
 		TiAnimation animation = null;
@@ -184,6 +181,7 @@ public abstract class TiWindowProxy extends TiViewProxy
 		opened = false;
 
 		// TODO ?
+		fireEvent("closeFromActivity", null);
 		activity = null;
 	}
 
@@ -225,17 +223,24 @@ public abstract class TiWindowProxy extends TiViewProxy
 		return TiUIHelper.viewToImage(new KrollDict(), getActivity().getWindow().getDecorView());
 	}
 
-	// only exists to expose a way for the activity to update the orientation based on
-	// the modes already set on the window
-	public void updateOrientation()
+	/*
+	 * Called when the window's activity has been created.
+	 */
+	public void onWindowActivityCreated()
 	{
-		setOrientationModes (orientationModes);
+		windowActivityCreated = true;
+
+		// Make sure the activity opens according to any orientation modes 
+		// set on the window before the activity was actually created.
+		if (orientationModes != null) {
+			setOrientationModes(orientationModes);
+		}
 	}
 
 	@Kroll.setProperty @Kroll.method
 	public void setLeftNavButton(Object button)
 	{
-		Log.w(LCAT, "setLeftNavButton not supported in Android");
+		Log.w(TAG, "setLeftNavButton not supported in Android");
 	}
 
 	@Kroll.method
@@ -316,13 +321,23 @@ public abstract class TiWindowProxy extends TiViewProxy
 			{
 				activityOrientationMode = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
 			}
+			else if (hasPortraitReverse && Build.VERSION.SDK_INT >= 9)
+			{
+				activityOrientationMode = 9;
+			}
 			else if (hasLandscape)
 			{
 				activityOrientationMode = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
 			}
+			else if (hasLandscapeReverse && Build.VERSION.SDK_INT >= 9)
+			{
+				activityOrientationMode = 8;
+			}
 
-			Activity activity = getActivity();
-			if (activity != null)
+			Activity activity = getWindowActivity();
+
+			// Wait until the window activity is created before setting orientation modes.
+			if (activity != null && windowActivityCreated)
 			{
 				if (activityOrientationMode != -1)
 				{
@@ -353,30 +368,17 @@ public abstract class TiWindowProxy extends TiViewProxy
 		return orientationModes;
 	}
 
-	/*
-	@Kroll.method(name="getActivity")
-	@Kroll.getProperty(name="activity")
+	
+	// Expose the method and property here, instead of in KrollProxy
+	@Kroll.method(name = "getActivity") @Kroll.getProperty(name = "_internalActivity")
 	public ActivityProxy getActivityProxy()
 	{
-		Object activityObject = getProperty(TiC.PROPERTY_ACTIVITY);
-		ActivityProxy activityProxy = null;
-		if (activityObject == null) {
-			activityProxy = new ActivityProxy();
-			setProperty(TiC.PROPERTY_ACTIVITY, activityProxy);
-		} else if (activityObject instanceof KrollDict) {
-			KrollDict options = (KrollDict) activityObject;
-			activityProxy = new ActivityProxy();
-			activityProxy.handleCreationDict(options);
-			setProperty(TiC.PROPERTY_ACTIVITY, activityProxy);
-		} else if (activityObject instanceof ActivityProxy) {
-			activityProxy = (ActivityProxy) activityObject;
-		}
-		return activityProxy;
-	}*/
+		return super.getActivityProxy();
+	}
 
 	protected abstract void handleOpen(KrollDict options);
 	protected abstract void handleClose(KrollDict options);
-	protected abstract Activity handleGetActivity();
+	protected abstract Activity getWindowActivity();
 
 	/**
 	 * Sub-classes will need to call handlePostOpen after their window is visible
@@ -397,6 +399,14 @@ public abstract class TiWindowProxy extends TiViewProxy
 		{
 			waitingForOpen = null;
 		}
+
+		View nativeView = view.getNativeView();
+
+		// Make sure we draw the view during the layout pass. This does not seem to cause another layout pass. We need
+		// to force the view to be drawn due to TIMOB-7685
+		if (nativeView != null) {
+			nativeView.postInvalidate();
+		}
 	}
 
 	@Kroll.method
@@ -409,7 +419,7 @@ public abstract class TiWindowProxy extends TiViewProxy
 			return TiOrientationHelper.convertConfigToTiOrientationMode(activity.getResources().getConfiguration().orientation);
 		}
 
-		Log.e(LCAT, "unable to get orientation, activity not found for window");
+		Log.e(TAG, "Unable to get orientation, activity not found for window", Log.DEBUG_MODE);
 		return TiOrientationHelper.ORIENTATION_UNKNOWN;
 	}
 

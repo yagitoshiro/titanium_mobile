@@ -17,7 +17,7 @@
 /**
  * Modifications copyright:
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  * 
@@ -31,15 +31,14 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Map;
 
-import org.appcelerator.kroll.common.TiConfig;
+import org.appcelerator.kroll.common.Log;
+import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.util.TiPlatformHelper;
 
 import ti.modules.titanium.media.MediaModule;
 import ti.modules.titanium.media.TiPlaybackListener;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.res.AssetFileDescriptor;
 import android.media.AudioManager;
@@ -47,9 +46,9 @@ import android.media.MediaPlayer;
 import android.media.MediaPlayer.OnCompletionListener;
 import android.media.MediaPlayer.OnErrorListener;
 import android.net.Uri;
+import android.os.Build;
 import android.util.AttributeSet;
 import android.util.DisplayMetrics;
-import android.util.Log;
 import android.view.Display;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -69,7 +68,6 @@ import android.widget.MediaController.MediaPlayerControl;
 public class TiVideoView8 extends SurfaceView implements MediaPlayerControl
 {
 	private static final String TAG = "TiVideoView8";
-	private static final boolean DBG = TiConfig.LOGD;
 	// TITANIUM
 	private int mScalingMode = MediaModule.VIDEO_SCALING_ASPECT_FIT;
 	// settable by the client
@@ -119,6 +117,7 @@ public class TiVideoView8 extends SurfaceView implements MediaPlayerControl
 
 	// TITANIUM
 	private TiPlaybackListener mPlaybackListener;
+	private float mVolume = 1.0f;
 
 	public TiVideoView8(Context context)
 	{
@@ -181,10 +180,8 @@ public class TiVideoView8 extends SurfaceView implements MediaPlayerControl
 
 	protected void measureVideo(int videoWidth, int videoHeight, int widthMeasureSpec, int heightMeasureSpec)
 	{
-		if (DBG) {
-			Log.e(TAG, "******* mVideoWidth: " + videoWidth + " mVideoHeight: " + videoHeight + " width: "
-				+ MeasureSpec.getSize(widthMeasureSpec) + " height: " + MeasureSpec.getSize(heightMeasureSpec));
-		}
+		Log.e(TAG, "******* mVideoWidth: " + videoWidth + " mVideoHeight: " + videoHeight + " width: "
+			+ MeasureSpec.getSize(widthMeasureSpec) + " height: " + MeasureSpec.getSize(heightMeasureSpec), Log.DEBUG_MODE);
 
 		int width = getDefaultSize(videoWidth, widthMeasureSpec);
 		int height = getDefaultSize(videoHeight, heightMeasureSpec);
@@ -233,23 +230,17 @@ public class TiVideoView8 extends SurfaceView implements MediaPlayerControl
 					if (width * TiPlatformHelper.applicationScaleFactor > maxScaledWidth) {
 						int oldWidth = width;
 						width = d.getWidth() - 1;
-						if (DBG) {
-							Log.d(TAG, "TOO WIDE: " + oldWidth + " changed to " + width);
-						}
+						Log.d(TAG, "TOO WIDE: " + oldWidth + " changed to " + width, Log.DEBUG_MODE);
 					}
 					if (height * TiPlatformHelper.applicationScaleFactor > maxScaledHeight) {
 						int oldHeight = height;
 						height = d.getHeight() - 1;
-						if (DBG) {
-							Log.d(TAG, "TOO HIGH: " + oldHeight + " changed to " + height);
-						}
+						Log.d(TAG, "TOO HIGH: " + oldHeight + " changed to " + height, Log.DEBUG_MODE);
 					}
 				}
 			}
 		}
-		if (DBG) {
-			Log.i(TAG, "setting size: " + width + 'x' + height);
-		}
+		Log.i(TAG, "setting size: " + width + 'x' + height, Log.DEBUG_MODE);
 		setMeasuredDimension(width, height);
 	}
 
@@ -321,6 +312,17 @@ public class TiVideoView8 extends SurfaceView implements MediaPlayerControl
 		invalidate();
 	}
 
+	/*
+	 * TITANIUM: Allow setting player volume level.
+	 */
+	public void setVolume(float volume)
+	{
+		mVolume = Math.min(Math.max(volume, 0.0f), 1.0f);
+		if (mMediaPlayer != null) {
+			mMediaPlayer.setVolume(mVolume, mVolume);
+		}
+	}
+
 	public void stopPlayback()
 	{
 		if (mMediaPlayer != null) {
@@ -341,9 +343,10 @@ public class TiVideoView8 extends SurfaceView implements MediaPlayerControl
 	private void setDataSource()
 	{
 		try {
-			if ("http".equals(mUri.getScheme()) || "https".equals(mUri.getScheme())) {
+			if (Build.VERSION.SDK_INT < TiC.API_LEVEL_HONEYCOMB &&
+					("http".equals(mUri.getScheme()) || "https".equals(mUri.getScheme()))) {
 				// Media player doesn't handle redirects, try to follow them
-				// here
+				// here. (Redirects work fine without this in ICS.)
 				while (true) {
 					// java.net.URL doesn't handle rtsp
 					if (mUri.getScheme() != null && mUri.getScheme().equals("rtsp"))
@@ -423,18 +426,19 @@ public class TiVideoView8 extends SurfaceView implements MediaPlayerControl
 			mMediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
 			mMediaPlayer.setScreenOnWhilePlaying(true);
 			mMediaPlayer.prepareAsync();
+			mMediaPlayer.setVolume(mVolume, mVolume);
 			// we don't set the target state here either, but preserve the
 			// target state that was there before.
 			mCurrentState = STATE_PREPARING;
 			attachMediaController();
 		} catch (IOException ex) {
-			Log.w(TAG, "Unable to open content: " + mUri, ex);
+			Log.e(TAG, "Unable to open content: " + mUri, ex);
 			mCurrentState = STATE_ERROR;
 			mTargetState = STATE_ERROR;
 			mErrorListener.onError(mMediaPlayer, MediaPlayer.MEDIA_ERROR_UNKNOWN, 0);
 			return;
 		} catch (IllegalArgumentException ex) {
-			Log.w(TAG, "Unable to open content: " + mUri, ex);
+			Log.e(TAG, "Unable to open content: " + mUri, ex);
 			mCurrentState = STATE_ERROR;
 			mTargetState = STATE_ERROR;
 			mErrorListener.onError(mMediaPlayer, MediaPlayer.MEDIA_ERROR_UNKNOWN, 0);
@@ -573,42 +577,6 @@ public class TiVideoView8 extends SurfaceView implements MediaPlayerControl
 				}
 			}
 
-			/*
-			 * Otherwise, pop up an error dialog so the user knows that
-			 * something bad has happened. Only try and pop up the dialog
-			 * if we're attached to a window. When we're going away and no
-			 * longer have a window, don't bother showing the user an error.
-			 */
-			if (getWindowToken() != null) {
-				// Resources r = mContext.getResources();
-				// int messageId;
-				String message;
-
-				if (framework_err == MediaPlayer.MEDIA_ERROR_NOT_VALID_FOR_PROGRESSIVE_PLAYBACK) {
-					// messageId =
-					// com.android.internal.R.string.VideoView_error_text_invalid_progressive_playback;
-					message = "Invalid progressive playback";
-				} else {
-					// messageId =
-					// com.android.internal.R.string.VideoView_error_text_unknown;
-					message = "Unknown error";
-				}
-
-				new AlertDialog.Builder(getContext()).setTitle("Video View").setMessage(message)
-					.setPositiveButton("Error", new DialogInterface.OnClickListener() {
-						public void onClick(DialogInterface dialog, int whichButton)
-						{
-							/*
-							 * If we get here, there is no onError listener,
-							 * so
-							 * at least inform them that the video is over.
-							 */
-							if (mOnCompletionListener != null) {
-								mOnCompletionListener.onCompletion(mMediaPlayer);
-							}
-						}
-					}).setCancelable(false).show();
-			}
 			return true;
 		}
 	};

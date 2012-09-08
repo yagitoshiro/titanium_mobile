@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -13,7 +13,6 @@ import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.annotations.Kroll;
 import org.appcelerator.kroll.common.AsyncResult;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.kroll.common.TiMessenger;
 import org.appcelerator.titanium.TiActivity;
 import org.appcelerator.titanium.TiApplication;
@@ -23,22 +22,25 @@ import org.appcelerator.titanium.proxy.TiBaseWindowProxy;
 import org.appcelerator.titanium.proxy.TiWindowProxy;
 import org.appcelerator.titanium.util.TiConvert;
 import org.appcelerator.titanium.util.TiUIHelper;
-import org.appcelerator.titanium.view.TiDrawableReference;
 import org.appcelerator.titanium.view.TiUIView;
 
 import ti.modules.titanium.ui.widget.TiUITabGroup;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.drawable.Drawable;
+import android.os.Handler;
 import android.os.Message;
 import android.os.Messenger;
 import android.widget.TabHost.TabSpec;
 
-@Kroll.proxy(creatableInModule=UIModule.class)
+@Kroll.proxy(creatableInModule=UIModule.class, propertyAccessors={
+	TiC.PROPERTY_TABS_BACKGROUND_COLOR,
+	TiC.PROPERTY_TABS_BACKGROUND_SELECTED_COLOR	
+})
+
 public class TabGroupProxy extends TiWindowProxy
 {
-	private static final String LCAT = "TabGroupProxy";
-	private static boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TabGroupProxy";
 
 	private static final int MSG_FIRST_ID = TiWindowProxy.MSG_LAST_ID + 1;
 
@@ -72,6 +74,22 @@ public class TabGroupProxy extends TiWindowProxy
 		throw new IllegalStateException("call to getView on a Window");
 	}
 
+	public String getTabsBackgroundColor() {
+		if (hasProperty(TiC.PROPERTY_TABS_BACKGROUND_COLOR)) {
+			return getProperty(TiC.PROPERTY_TABS_BACKGROUND_COLOR).toString();
+		} else {
+			return null;
+		}
+	}
+	
+	public String getTabsBackgroundSelectedColor() {
+		if (hasProperty(TiC.PROPERTY_TABS_BACKGROUND_SELECTED_COLOR)) {
+			return getProperty(TiC.PROPERTY_TABS_BACKGROUND_SELECTED_COLOR).toString();
+		} else {
+			return null;
+		}
+	}
+
 	@Override
 	public boolean handleMessage(Message msg)
 	{
@@ -88,13 +106,6 @@ public class TabGroupProxy extends TiWindowProxy
 				result.setResult(null); // signal added
 				return true;
 			}
-			case MSG_FINISH_OPEN: {
-				TiTabActivity activity = (TiTabActivity) msg.obj;
-				view = new TiUITabGroup(this, activity);
-				modelListener = view;
-				handlePostOpen(activity);
-				return true;
-			}
 			case MSG_SET_ACTIVE_TAB: {
 				AsyncResult result = (AsyncResult) msg.obj;
 				doSetActiveTab(result.getArg());
@@ -107,7 +118,6 @@ public class TabGroupProxy extends TiWindowProxy
 		}
 	}
 
-	@Kroll.getProperty @Kroll.method
 	public TabProxy[] getTabs()
 	{
 		TabProxy[] tps = null;
@@ -144,20 +154,10 @@ public class TabGroupProxy extends TiWindowProxy
 
 	private void handleAddTab(TabProxy tab)
 	{
-		String tag = TiConvert.toString(tab.getProperty(TiC.PROPERTY_TAG));
+		String tag = TiConvert.toString(tab.getProperty(TiC.PROPERTY_TAG) );
 		if (tag == null) {
-			String title = TiConvert.toString(tab.getProperty(TiC.PROPERTY_TITLE));
-			if (title == null) {
-				String icon = TiConvert.toString(tab.getProperty(TiC.PROPERTY_ICON));
-				if (icon == null) {
-					tag = tab.toString();
-				} else {
-					tag = icon;
-				}
-			} else {
-				tag = title;
-			}
-			
+			//since tag is used to create tabSpec, it must be unique, otherwise tabs with same tag will use same activity (Timob-7487)
+			tag = tab.toString();
 			tab.setProperty(TiC.PROPERTY_TAG, tag, false); // store in proxy
 		}
 
@@ -176,11 +176,11 @@ public class TabGroupProxy extends TiWindowProxy
 	{
 		TiTabActivity tta = weakActivity.get();
 		if (tta == null) {
-			if (DBG) {
-				Log.w(LCAT, "Could not add tab because tab activity no longer exists");
-			}
+			Log.w(TAG, "Could not add tab because tab activity no longer exists", Log.DEBUG_MODE);
 		}
-		Drawable icon = TiDrawableReference.fromObject(getActivity(), tab.getProperty(TiC.PROPERTY_ICON)).getDrawable();
+		Object iconProperty = tab.getProperty(TiC.PROPERTY_ICON);
+		Drawable icon = TiUIHelper.getResourceDrawable(iconProperty);
+
 		String tag = TiConvert.toString(tab.getProperty(TiC.PROPERTY_TAG));
 		String title = TiConvert.toString(tab.getProperty(TiC.PROPERTY_TITLE));
 		if (title == null) {
@@ -195,14 +195,12 @@ public class TabGroupProxy extends TiWindowProxy
 		TiBaseWindowProxy baseWindow = (TiBaseWindowProxy) tab.getProperty(TiC.PROPERTY_WINDOW);
 		if (baseWindow != null) {
 			windowProxy.handleCreationDict(baseWindow.getProperties());
+			tab.setWindow(baseWindow);  // hooks up the tab and the JS window wrapper
 			baseWindow.getKrollObject().setWindow(windowProxy);
 
 		} else {
-			Log.w(LCAT, "window property was not set on tab");
+			Log.w(TAG, "Window property was not set on tab", Log.DEBUG_MODE);
 		}
-
-		baseWindow.setTabGroupProxy(this);
-		baseWindow.setTabProxy(tab);
 
 		if (tag != null && windowProxy != null) {
 			TabSpec tspec = tg.newTab(tag);
@@ -213,11 +211,12 @@ public class TabGroupProxy extends TiWindowProxy
 			}
 
 			Intent intent = new Intent(tta, TiActivity.class);
-			windowProxy.fillIntentForTab(intent);
-
+			windowProxy.setParent(tab);
+			windowProxy.fillIntentForTab(intent, tab);
+			
 			tspec.setContent(intent);
 
-			tg.addTab(tspec);
+			tg.addTab(tspec, tab);
 		}
 	}
 
@@ -249,6 +248,23 @@ public class TabGroupProxy extends TiWindowProxy
 		}
 	}
 
+	@Override
+	public void handleCreationDict(KrollDict options) {
+		super.handleCreationDict(options);
+
+		// Support setting orientation modes at creation.
+		Object orientationModes = options.get(TiC.PROPERTY_ORIENTATION_MODES);
+		if (orientationModes != null && orientationModes instanceof Object[]) {
+			try {
+				int[] modes = TiConvert.toIntArray((Object[]) orientationModes);
+				setOrientationModes(modes);
+
+			} catch (ClassCastException e) {
+				Log.e(TAG, "Invalid orientationMode array. Must only contain orientation mode constants.");
+			}
+		}
+	}
+
 	@Kroll.getProperty @Kroll.method
 	public TabProxy getActiveTab()
 	{
@@ -259,9 +275,9 @@ public class TabGroupProxy extends TiWindowProxy
 			int activeTabIndex = tg.getActiveTab();
 
 			if (activeTabIndex < 0) {
-				Log.e(LCAT, "unable to get active tab, invalid index returned: " + activeTabIndex);
+				Log.e(TAG, "Unable to get active tab, invalid index returned: " + activeTabIndex);
 			} else if (activeTabIndex >= tabs.size()) {
-				Log.e(LCAT, "unable to get active tab, index is larger than tabs array: " + activeTabIndex);
+				Log.e(TAG, "Unable to get active tab, index is larger than tabs array: " + activeTabIndex);
 			}
 			activeTab = tabs.get(activeTabIndex);
 		} else {
@@ -270,18 +286,18 @@ public class TabGroupProxy extends TiWindowProxy
 				if (tabsIndex >= tabs.size()) {
 					activeTab = tabs.get(tabsIndex);
 				} else {
-					Log.e(LCAT, "Unable to get active tab, initialActiveTab index is larger than tabs array");
+					Log.e(TAG, "Unable to get active tab, initialActiveTab index is larger than tabs array");
 				}
 			} else if (initialActiveTab instanceof TabProxy) {
 				activeTab = (TabProxy)initialActiveTab;
 			} else {
-				Log.e(LCAT, "Unable to get active tab, initialActiveTab is not recognized");
+				Log.e(TAG, "Unable to get active tab, initialActiveTab is not recognized");
 			}
 		}
 
 		if (activeTab == null) {
 			String errorMessage = "Failed to get activeTab, make sure tabs are added first before calling getActiveTab()";
-			Log.e(LCAT, errorMessage);
+			Log.e(TAG, errorMessage);
 			throw new RuntimeException(errorMessage);
 		}
 		return activeTab;
@@ -290,9 +306,7 @@ public class TabGroupProxy extends TiWindowProxy
 	@Override
 	protected void handleOpen(KrollDict options)
 	{
-		if (DBG) {
-			Log.d(LCAT, "handleOpen: " + options);
-		}
+		Log.d(TAG, "handleOpen: " + options, Log.DEBUG_MODE);
 
 		if (hasProperty(TiC.PROPERTY_ACTIVE_TAB)) {
 			initialActiveTab = getProperty(TiC.PROPERTY_ACTIVE_TAB);
@@ -314,23 +328,33 @@ public class TabGroupProxy extends TiWindowProxy
 				addTabToGroup(tg, tab);
 			}
 		}
+
+		// Setup the new tab activity like setting orientation modes.
+		onWindowActivityCreated();
+		
 		tg.changeActiveTab(initialActiveTab);
+		// Make sure the tab indicator is selected. We need to force it to be selected due to TIMOB-7832.
+		tg.setTabIndicatorSelected(initialActiveTab);
 
 		opened = true;
 		super.handlePostOpen();
 		fireEvent(TiC.EVENT_OPEN, null);
+
+		// open event's for a tab window should be fired as part of the windowCreated callback that 
+		// is set as part of the fillIntentForTab call
 	}
 
 	@Override
 	protected void handleClose(KrollDict options)
 	{
-		if (DBG) {
-			Log.d(LCAT, "handleClose: " + options);
-		}
+		Log.d(TAG, "handleClose: " + options, Log.DEBUG_MODE);
 		
 		modelListener = null;
-		if (this.weakActivity.get() != null) {
-			this.weakActivity.get().finish();
+		Activity tabActivity = this.weakActivity.get();
+		if (tabActivity != null) {
+			tabActivity.finish();
+			// Finishing an activity is not synchronous, so we remove the activity from the activity stack here
+			TiApplication.removeFromActivityStack(tabActivity);
 		};
 		releaseViews();
 		windowId = null;
@@ -339,12 +363,6 @@ public class TabGroupProxy extends TiWindowProxy
 		opened = false;
 	}
 
-	public KrollDict buildFocusEvent(String to, String from)
-	{
-		int toIndex = indexForId(to);
-		int fromIndex = indexForId(from);
-		return buildFocusEvent(toIndex, fromIndex);
-	}
 
 	public KrollDict buildFocusEvent(int toIndex, int fromIndex)
 	{
@@ -368,22 +386,6 @@ public class TabGroupProxy extends TiWindowProxy
 		return e;
 	}
 
-	private int indexForId(String id)
-	{
-		int index = -1;
-
-		int i = 0;
-		for(TabProxy t : tabs) {
-			String tag = (String) t.getProperty(TiC.PROPERTY_TAG);
-			if (tag.equals(id)) {
-				index = i;
-				break;
-			}
-			i += 1;
-		}
-		return index;
-	}
-
 	private void fillIntent(Activity activity, Intent intent)
 	{
 		if (hasProperty(TiC.PROPERTY_FULLSCREEN)) {
@@ -402,12 +404,43 @@ public class TabGroupProxy extends TiWindowProxy
 			intent.putExtra(TiC.INTENT_PROPERTY_FINISH_ROOT, activity.isTaskRoot());
 		}
 
-		Messenger messenger = new Messenger(getMainHandler());
+		Handler handler = new Handler(TiMessenger.getMainMessenger().getLooper(), new MessageHandler(this));
+		Messenger messenger = new Messenger(handler);
 		//Messenger messenger = new Messenger(getUIHandler());
 		intent.putExtra(TiC.INTENT_PROPERTY_MESSENGER, messenger);
 		intent.putExtra(TiC.INTENT_PROPERTY_MSG_ID, MSG_FINISH_OPEN);
 	}
 
+	private static class MessageHandler implements Handler.Callback
+	{
+
+		private WeakReference<TabGroupProxy> tabGroupProxy;
+		
+		public MessageHandler(TabGroupProxy proxy) 
+		{
+			this.tabGroupProxy = new WeakReference<TabGroupProxy>(proxy);
+		}
+		
+		@Override
+		public boolean handleMessage(Message msg) 
+		{
+			TabGroupProxy tabGroupProxy = this.tabGroupProxy.get();
+			if (tabGroupProxy == null) {
+				return false;
+			}
+			
+			switch(msg.what) {
+				case MSG_FINISH_OPEN:
+					TiTabActivity activity = (TiTabActivity) msg.obj;
+					tabGroupProxy.view = new TiUITabGroup(tabGroupProxy, activity);
+					tabGroupProxy.modelListener = tabGroupProxy.view;
+					tabGroupProxy.handlePostOpen(activity);
+					return true;
+			}
+			return false;
+		}
+		
+	}
 	@Override
 	public KrollDict handleToImage()
 	{
@@ -432,8 +465,20 @@ public class TabGroupProxy extends TiWindowProxy
 	}
 
 	@Override
-	protected Activity handleGetActivity()
+	protected Activity getWindowActivity()
 	{
-		return weakActivity.get();
+		if (weakActivity != null) {
+			return weakActivity.get();
+		}
+
+		return null;
+	}
+
+	@Kroll.method @Kroll.setProperty
+	@Override
+	public void setOrientationModes(int[] modes) {
+		// Unlike Windows this setter is not defined in JavaScript.
+		// We need to expose it here with an annotation.
+		super.setOrientationModes(modes);
 	}
 }

@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -11,7 +11,6 @@ import java.util.HashMap;
 import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.TiConvert;
@@ -28,15 +27,24 @@ import android.widget.TextView;
 
 public class TiUILabel extends TiUIView
 {
-	private static final String LCAT = "TiUILabel";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TiUILabel";
 
-	public TiUILabel(TiViewProxy proxy) {
+	public TiUILabel(final TiViewProxy proxy)
+	{
 		super(proxy);
-		if (DBG) {
-			Log.d(LCAT, "Creating a text label");
-		}
-		TextView tv = new TextView(getProxy().getActivity());
+		Log.d(TAG, "Creating a text label", Log.DEBUG_MODE);
+		TextView tv = new TextView(getProxy().getActivity())
+		{
+			@Override
+			protected void onLayout(boolean changed, int left, int top, int right, int bottom)
+			{
+				super.onLayout(changed, left, top, right, bottom);
+
+				if (proxy != null && proxy.hasListeners(TiC.EVENT_POST_LAYOUT)) {
+					proxy.fireEvent(TiC.EVENT_POST_LAYOUT, null, false);
+				}
+			}
+		};
 		tv.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
 		tv.setPadding(0, 0, 0, 0);
 		tv.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
@@ -69,13 +77,10 @@ public class TiUILabel extends TiUIView
 		if (d.containsKey(TiC.PROPERTY_FONT)) {
 			TiUIHelper.styleText(tv, d.getKrollDict(TiC.PROPERTY_FONT));
 		}
-		if (d.containsKey(TiC.PROPERTY_TEXT_ALIGN)) {
-			String textAlign = d.getString(TiC.PROPERTY_TEXT_ALIGN);
-			TiUIHelper.setAlignment(tv, textAlign, null);
-		}
-		if (d.containsKey(TiC.PROPERTY_VERTICAL_ALIGN)) {
-			String verticalAlign = d.getString(TiC.PROPERTY_VERTICAL_ALIGN);
-			TiUIHelper.setAlignment(tv, null, verticalAlign);
+		if (d.containsKey(TiC.PROPERTY_TEXT_ALIGN) || d.containsKey(TiC.PROPERTY_VERTICAL_ALIGN)) {
+			String textAlign = d.optString(TiC.PROPERTY_TEXT_ALIGN, "left");
+			String verticalAlign = d.optString(TiC.PROPERTY_VERTICAL_ALIGN, "center");
+			TiUIHelper.setAlignment(tv, textAlign, verticalAlign);
 		}
 		if (d.containsKey(TiC.PROPERTY_ELLIPSIZE)) {
 			if (TiConvert.toBoolean(d, TiC.PROPERTY_ELLIPSIZE)) {
@@ -88,31 +93,21 @@ public class TiUILabel extends TiUIView
 			tv.setSingleLine(!TiConvert.toBoolean(d, TiC.PROPERTY_WORD_WRAP));
 		}
 		// This needs to be the last operation.
-		linkifyIfEnabled(tv, d.get(TiC.PROPERTY_AUTO_LINK));
+		TiUIHelper.linkifyIfEnabled(tv, d.get(TiC.PROPERTY_AUTO_LINK));
 		tv.invalidate();
-	}
-
-	private void linkifyIfEnabled(TextView tv, Object autoLink)
-	{
-		if (autoLink != null) {
-			Linkify.addLinks(tv, TiConvert.toInt(autoLink));
-		}
 	}
 	
 	@Override
 	public void propertyChanged(String key, Object oldValue, Object newValue, KrollProxy proxy)
 	{
-		if (DBG) {
-			Log.d(LCAT, "Property: " + key + " old: " + oldValue + " new: " + newValue);
-		}
 		TextView tv = (TextView) getNativeView();
 		if (key.equals(TiC.PROPERTY_HTML)) {
 			tv.setText(Html.fromHtml(TiConvert.toString(newValue)), TextView.BufferType.SPANNABLE);
-			linkifyIfEnabled(tv, proxy.getProperty(TiC.PROPERTY_AUTO_LINK));
+			TiUIHelper.linkifyIfEnabled(tv, proxy.getProperty(TiC.PROPERTY_AUTO_LINK));
 			tv.requestLayout();
 		} else if (key.equals(TiC.PROPERTY_TEXT) || key.equals(TiC.PROPERTY_TITLE)) {
 			tv.setText(TiConvert.toString(newValue));
-			linkifyIfEnabled(tv, proxy.getProperty(TiC.PROPERTY_AUTO_LINK));
+			TiUIHelper.linkifyIfEnabled(tv, proxy.getProperty(TiC.PROPERTY_AUTO_LINK));
 			tv.requestLayout();
 		} else if (key.equals(TiC.PROPERTY_COLOR)) {
 			tv.setTextColor(TiConvert.toColor((String) newValue));

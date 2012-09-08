@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -10,7 +10,6 @@ import java.net.URI;
 import java.net.URISyntaxException;
 
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.io.TiBaseFile;
 import org.appcelerator.titanium.io.TiFileFactory;
@@ -23,7 +22,6 @@ import android.net.Uri;
 public class TiUrl
 {
 	protected static final String TAG = "TiUrl";
-	protected static final boolean DBG = TiConfig.LOGD;
 
 	public static final String PATH_SEPARATOR = "/";
 	public static final String SCHEME_SUFFIX = "://";
@@ -31,6 +29,7 @@ public class TiUrl
 	public static final String CURRENT_PATH = ".";
 	public static final String PARENT_PATH_WITH_SEPARATOR = "../";
 	public static final String CURRENT_PATH_WITH_SEPARATOR = "./";
+    
 
 	public String baseUrl;
 	public String url;
@@ -42,8 +41,8 @@ public class TiUrl
 
 	public TiUrl(String baseUrl, String url)
 	{
-		this.baseUrl = baseUrl;
-		this.url = url;
+		this.baseUrl = (baseUrl == null) ? TiC.URL_APP_PREFIX : baseUrl;
+		this.url = (url == null) ? "" : url;
 	}
 
 	public String getNormalizedUrl()
@@ -129,11 +128,9 @@ public class TiUrl
 
 	public static TiUrl normalizeWindowUrl(String baseUrl, String url)
 	{
-		if (DBG) {
-			Log.d(TAG, "Window Base URL: " + baseUrl);
-			if (url != null) {
-				Log.d(TAG, "Window Relative URL: " + url);
-			}
+		Log.d(TAG, "Window Base URL: " + baseUrl, Log.DEBUG_MODE);
+		if (url != null) {
+			Log.d(TAG, "Window Relative URL: " + url, Log.DEBUG_MODE);
 		}
 		try {
 			URI uri = new URI(url);
@@ -176,7 +173,7 @@ public class TiUrl
 				throw new IllegalArgumentException("Scheme not implemented for " + url);
 			}
 		} catch (URISyntaxException e) {
-			Log.w(TAG, "Error parsing url: " + e.getMessage(), e);
+			Log.w(TAG, "Error parsing url: " + e.getMessage());
 		}
 		return new TiUrl(baseUrl, url);
 	}
@@ -285,8 +282,41 @@ public class TiUrl
 				return uri.toString();
 			}
 		} catch (URISyntaxException e) {
-			Log.w(TAG, "Error parsing url: " + e.getMessage(), e);
+			Log.w(TAG, "Error parsing url: " + e.getMessage());
 			return url;
+		}
+	}
+	
+	public static Uri getCleanUri(String argString) 
+	{
+		try {
+			if (argString == null) {
+				return null;
+			}
+			
+			Uri base = Uri.parse(argString);
+	
+			Uri.Builder builder = base.buildUpon();
+			builder.encodedQuery(Uri.encode(Uri.decode(base.getQuery()), "&="));
+			String encodedAuthority = Uri.encode(Uri.decode(base.getAuthority()),"/:@");
+			int firstAt = encodedAuthority.indexOf('@');
+			if (firstAt >= 0) {
+				int lastAt = encodedAuthority.lastIndexOf('@');
+				if (lastAt > firstAt) {
+					// We have a situation that might be like this:
+					// http://user@domain.com:password@api.mickey.com
+					// i.e., the user name is user@domain.com, and the host
+					// is api.mickey.com.  We need all at-signs prior to the final one (which
+					// indicates the host) to be encoded.
+					encodedAuthority = Uri.encode(encodedAuthority.substring(0, lastAt), "/:") + encodedAuthority.substring(lastAt);
+				}
+			}
+			builder.encodedAuthority(encodedAuthority);
+			builder.encodedPath(Uri.encode(Uri.decode(base.getPath()), "/"));
+			return builder.build();
+		} catch (Exception e) {
+			Log.e(TAG, "Exception in getCleanUri argString= " + argString);
+			return null;
 		}
 	}
 }

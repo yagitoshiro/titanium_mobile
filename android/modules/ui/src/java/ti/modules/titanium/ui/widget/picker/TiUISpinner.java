@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -32,8 +32,8 @@ public class TiUISpinner extends TiUIPicker
 	public TiUISpinner(TiViewProxy proxy, Activity activity)
 	{
 		this(proxy);
-		TiCompositeLayout layout = new TiCompositeLayout(activity, LayoutArrangement.HORIZONTAL);
-		layout.setDisableHorizontalWrap(true);
+		TiCompositeLayout layout = new TiCompositeLayout(activity, LayoutArrangement.HORIZONTAL, proxy);
+		layout.setEnableHorizontalWrap(true);
 		setNativeView(layout);
 	}
 

@@ -6,8 +6,10 @@
  */
 package ti.modules.titanium.ui;
 
+import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.KrollModule;
 import org.appcelerator.kroll.annotations.Kroll;
+import org.appcelerator.titanium.TiApplication;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.TiContext;
 import org.appcelerator.titanium.proxy.TiViewProxy;
@@ -15,10 +17,12 @@ import org.appcelerator.titanium.view.TiUIView;
 
 import ti.modules.titanium.ui.widget.TiUIText;
 import android.app.Activity;
+import android.os.Message;
 
 @Kroll.proxy(creatableInModule=UIModule.class, propertyAccessors = {
 	TiC.PROPERTY_AUTOCAPITALIZATION,
 	TiC.PROPERTY_AUTOCORRECT,
+	TiC.PROPERTY_AUTO_LINK,
 	TiC.PROPERTY_CLEAR_ON_EDIT,
 	TiC.PROPERTY_COLOR,
 	TiC.PROPERTY_EDITABLE,
@@ -27,6 +31,7 @@ import android.app.Activity;
 	TiC.PROPERTY_FONT,
 	TiC.PROPERTY_HINT_TEXT,
 	TiC.PROPERTY_KEYBOARD_TYPE,
+	TiC.PROPERTY_MAX_LENGTH,
 	TiC.PROPERTY_PASSWORD_MASK,
 	TiC.PROPERTY_TEXT_ALIGN,
 	TiC.PROPERTY_VALUE,
@@ -35,9 +40,14 @@ import android.app.Activity;
 })
 public class TextAreaProxy extends TiViewProxy
 {
+	private static final int MSG_FIRST_ID = TiViewProxy.MSG_LAST_ID + 1;
+	private static final int MSG_SET_SELECTION = MSG_FIRST_ID + 201;
+
 	public TextAreaProxy()
 	{
 		super();
+		defaultValues.put(TiC.PROPERTY_VALUE, "");
+		defaultValues.put(TiC.PROPERTY_MAX_LENGTH, -1);
 	}
 
 	public TextAreaProxy(TiContext tiContext)
@@ -50,12 +60,58 @@ public class TextAreaProxy extends TiViewProxy
 	{
 		super.handleCreationArgs(createdInModule, args);
 
-		setProperty(TiC.PROPERTY_VALUE, "");
 	}
 
 	@Override
 	public TiUIView createView(Activity activity)
 	{
 		return new TiUIText(this, false);
+	}
+	
+	@Kroll.method
+	public Boolean hasText()
+	{
+		Object text = getProperty(TiC.PROPERTY_VALUE);
+		if (text != null && text instanceof String) {
+			return (((String)text).length() > 0);
+		}
+		return false;
+	}
+	
+	@Kroll.method
+	public void setSelection(int start, int stop)
+	{
+		TiUIView v = getOrCreateView();
+		if (v != null) {
+			if (TiApplication.isUIThread()) {
+				((TiUIText)v).setSelection(start, stop);
+				return;
+			}
+			KrollDict args = new KrollDict();
+			args.put(TiC.PROPERTY_START, start);
+			args.put(TiC.PROPERTY_STOP, stop);
+			getMainHandler().obtainMessage(MSG_SET_SELECTION, args).sendToTarget();
+		}
+	}
+	
+	public boolean handleMessage(Message msg)
+	{
+		switch (msg.what) {
+			case MSG_SET_SELECTION: {
+				TiUIView v = getOrCreateView();
+				if (v != null) {
+					Object argsObj = msg.obj;
+					if (argsObj instanceof KrollDict) {
+						KrollDict args = (KrollDict) argsObj;
+						((TiUIText)v).setSelection(args.getInt(TiC.PROPERTY_START), args.getInt(TiC.PROPERTY_STOP));
+					}
+				}
+				return true;
+			}
+			
+			default: {
+				return super.handleMessage(msg);
+			}
+		}
 	}
 }

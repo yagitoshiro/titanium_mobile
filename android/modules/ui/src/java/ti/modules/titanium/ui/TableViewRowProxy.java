@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -17,6 +17,7 @@ import org.appcelerator.titanium.TiContext;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.view.TiUIView;
 
+import ti.modules.titanium.ui.widget.TiUITableView;
 import ti.modules.titanium.ui.widget.tableview.TableViewModel;
 import ti.modules.titanium.ui.widget.tableview.TableViewModel.Item;
 import ti.modules.titanium.ui.widget.tableview.TiTableViewRowProxyItem;
@@ -31,11 +32,13 @@ propertyAccessors = {
 	TiC.PROPERTY_LAYOUT,
 	TiC.PROPERTY_LEFT_IMAGE,
 	TiC.PROPERTY_RIGHT_IMAGE,
-	TiC.PROPERTY_TITLE
+	TiC.PROPERTY_TITLE,
+	TiC.PROPERTY_HEADER,
+	TiC.PROPERTY_FOOTER
 })
 public class TableViewRowProxy extends TiViewProxy
 {
-	private static final String LCAT = "TableViewRowProxy";
+	private static final String TAG = "TableViewRowProxy";
 
 	protected ArrayList<TiViewProxy> controls;
 	protected TiTableViewRowProxyItem tableViewItem;
@@ -53,16 +56,34 @@ public class TableViewRowProxy extends TiViewProxy
 	}
 
 	@Override
+	public void setActivity(Activity activity)
+	{
+		super.setActivity(activity);
+		if (controls != null) {
+			for (TiViewProxy control : controls) {
+				control.setActivity(activity);
+			}
+		}
+	}
+
+	@Override
 	public void handleCreationDict(KrollDict options)
 	{
 		super.handleCreationDict(options);
 		if (options.containsKey(TiC.PROPERTY_SELECTED_BACKGROUND_COLOR)) {
-			Log.w(LCAT, "selectedBackgroundColor is deprecated, use backgroundSelectedColor instead");
+			Log.w(TAG, "selectedBackgroundColor is deprecated, use backgroundSelectedColor instead");
 			setProperty(TiC.PROPERTY_BACKGROUND_SELECTED_COLOR, options.get(TiC.PROPERTY_SELECTED_BACKGROUND_COLOR));
 		}
 		if (options.containsKey(TiC.PROPERTY_SELECTED_BACKGROUND_IMAGE)) {
-			Log.w(LCAT, "selectedBackgroundImage is deprecated, use backgroundSelectedImage instead");
+			Log.w(TAG, "selectedBackgroundImage is deprecated, use backgroundSelectedImage instead");
 			setProperty(TiC.PROPERTY_BACKGROUND_SELECTED_IMAGE, options.get(TiC.PROPERTY_SELECTED_BACKGROUND_IMAGE));
+		}
+	}
+
+	public void setCreationProperties(KrollDict options)
+	{
+		for (String key : options.keySet()) {
+			setProperty(key, options.get(key));
 		}
 	}
 
@@ -79,9 +100,9 @@ public class TableViewRowProxy extends TiViewProxy
 		return (controls != null && controls.size() > 0);
 	}
 	
-	@Override
+	@Override 
 	public TiViewProxy[] getChildren() {
-		if (children == null) {
+		if (controls == null) {
 			return new TiViewProxy[0];
 		}
 		return controls.toArray(new TiViewProxy[controls.size()]);
@@ -144,6 +165,10 @@ public class TableViewRowProxy extends TiViewProxy
 		if (msg.what == MSG_SET_DATA) {
 			if (tableViewItem != null) {
 				tableViewItem.setRowData(this);
+				// update/refresh table view when a row's data changed.
+				TiUITableView table = getTable().getTableView();
+				table.setModelDirty();
+				table.updateView();
 			}
 			return true;
 		}
@@ -151,24 +176,43 @@ public class TableViewRowProxy extends TiViewProxy
 	}
 
 	public static void fillClickEvent(KrollDict data, TableViewModel model, Item item) {
-		data.put(TiC.PROPERTY_ROW_DATA, item.rowData);
+		
+		//Don't include rowData if we click on a section
+		if (!(item.proxy instanceof TableViewSectionProxy)) {
+			data.put(TiC.PROPERTY_ROW_DATA, item.rowData);
+		}
+		
 		data.put(TiC.PROPERTY_SECTION, model.getSection(item.sectionIndex));
 		data.put(TiC.EVENT_PROPERTY_ROW, item.proxy);
 		data.put(TiC.EVENT_PROPERTY_INDEX, item.index);
 		data.put(TiC.EVENT_PROPERTY_DETAIL, false);
 	}
 
-	 
+	@Override
 	public boolean fireEvent(String eventName, Object data) {
 		if (eventName.equals(TiC.EVENT_CLICK) || eventName.equals(TiC.EVENT_LONGCLICK)) {
-			// inject row click data for events coming from row children
+			// Inject row click data for events coming from row children.
 			TableViewProxy table = getTable();
 			Item item = tableViewItem.getRowData();
 			if (table != null && item != null && data instanceof KrollDict) {
-				fillClickEvent((KrollDict) data, table.getTableView().getModel(), item);
+				// The data object may already be in use by the runtime thread
+				// due to a child view's event fire. Create a copy to be thread safe.
+				KrollDict dataCopy = new KrollDict((KrollDict)data);
+				fillClickEvent(dataCopy, table.getTableView().getModel(), item);
+				data = dataCopy;
 			}
 		}
 		return super.fireEvent(eventName, data);
+	}
+
+	@Override
+	public void firePropertyChanged(String name, Object oldValue, Object newValue)
+	{
+		super.firePropertyChanged(name, oldValue, newValue);
+		TableViewProxy table = getTable();
+		if (table != null) {
+			table.updateView();
+		}
 	}
 
 	public void setLabelsClickable(boolean clickable) {

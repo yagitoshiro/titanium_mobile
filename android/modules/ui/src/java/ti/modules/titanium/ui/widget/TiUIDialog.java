@@ -1,15 +1,16 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
 package ti.modules.titanium.ui.widget;
 
+import java.lang.ref.WeakReference;
+
 import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.titanium.TiApplication;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.proxy.TiViewProxy;
@@ -24,13 +25,13 @@ import android.content.DialogInterface.OnCancelListener;
 
 public class TiUIDialog extends TiUIView
 {
-	private static final String LCAT = "TiUIDialog";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TiUIDialog";
 	private static final int BUTTON_MASK = 0x10000000;
 
 	protected Builder builder;
 	protected AlertDialog dialog;
 	protected TiUIView view;
+	protected WeakReference<Activity> ownerActivity;
 
 	protected class ClickHandler implements DialogInterface.OnClickListener
 	{
@@ -47,9 +48,7 @@ public class TiUIDialog extends TiUIView
 	public TiUIDialog(TiViewProxy proxy)
 	{
 		super(proxy);
-		if (DBG) {
-			Log.d(LCAT, "Creating a dialog");
-		}
+		Log.d(TAG, "Creating a dialog", Log.DEBUG_MODE);
 		createBuilder();
 	}
 
@@ -92,9 +91,7 @@ public class TiUIDialog extends TiUIView
 			String[] optionText = d.getStringArray(TiC.PROPERTY_OPTIONS);
 			int selectedIndex = d.containsKey(TiC.PROPERTY_SELECTED_INDEX) ? d.getInt(TiC.PROPERTY_SELECTED_INDEX) : -1; 
 			if(selectedIndex >= optionText.length){
-				if (DBG) {
-					Log.d(LCAT, "Ooops invalid selected index specified: " + selectedIndex);
-				}
+				Log.d(TAG, "Ooops invalid selected index specified: " + selectedIndex, Log.DEBUG_MODE);
 				selectedIndex = -1;
 			}
 			
@@ -148,7 +145,7 @@ public class TiUIDialog extends TiUIView
 				getBuilder().setNegativeButton(text, clicker);
 				break;
 			default:
-				Log.e(LCAT, "Only 3 buttons are supported");
+				Log.e(TAG, "Only 3 buttons are supported");
 			}
 		}
 	}
@@ -164,9 +161,7 @@ public class TiUIDialog extends TiUIView
 	@Override
 	public void propertyChanged(String key, Object oldValue, Object newValue, KrollProxy proxy)
 	{
-		if (DBG) {
-			Log.d(LCAT, "Property: " + key + " old: " + oldValue + " new: " + newValue);
-		}
+		Log.d(TAG, "Property: " + key + " old: " + oldValue + " new: " + newValue, Log.DEBUG_MODE);
 
 		if (key.equals(TiC.PROPERTY_TITLE)) {
 			if (dialog != null) {
@@ -234,9 +229,7 @@ public class TiUIDialog extends TiUIView
 				@Override
 				public void onCancel(DialogInterface dlg) {
 					int cancelIndex = (proxy.hasProperty(TiC.PROPERTY_CANCEL)) ? TiConvert.toInt(proxy.getProperty(TiC.PROPERTY_CANCEL)) : -1;
-					if (DBG) {
-						Log.d(LCAT, "onCancelListener called. Sending index: " + cancelIndex);
-					}
+					Log.d(TAG, "onCancelListener called. Sending index: " + cancelIndex, Log.DEBUG_MODE);
 					handleEvent(cancelIndex);
 					hide(null);
 				}
@@ -245,9 +238,15 @@ public class TiUIDialog extends TiUIView
 			builder = null;
 		}
 		try {
-			dialog.show();
+			Activity dialogActivity = ownerActivity.get();
+			if (dialogActivity != null && !dialogActivity.isFinishing()) {
+				dialog.show();
+			} else {
+				dialog = null;
+				Log.w(TAG, "Dialog activity is destroyed, unable to show dialog with message: " + TiConvert.toString(proxy.getProperty(TiC.PROPERTY_MESSAGE)));
+			}
 		} catch (Throwable t) {
-			Log.w(LCAT, "Context must have gone away: " + t.getMessage(), t);
+			Log.w(TAG, "Context must have gone away: " + t.getMessage(), t);
 		}
 	}
 
@@ -268,6 +267,7 @@ public class TiUIDialog extends TiUIView
 		Activity currentActivity = getCurrentActivity();
 		this.builder = new AlertDialog.Builder(currentActivity);
 		this.builder.setCancelable(true);
+		ownerActivity = new WeakReference<Activity>(currentActivity);
 	}
 
 	public void handleEvent(int id)

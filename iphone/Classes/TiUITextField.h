@@ -23,16 +23,17 @@
 	UIView *rightView;
 	
 	BOOL becameResponder;
-    NSInteger maxLength;
+    TiUIView * touchHandler;
 }
 
 @property(nonatomic,readwrite,assign) CGFloat paddingLeft;
 @property(nonatomic,readwrite,assign) CGFloat paddingRight;
 @property(nonatomic,readwrite,assign) CGFloat leftButtonPadding;
 @property(nonatomic,readwrite,assign) CGFloat rightButtonPadding;
-@property(nonatomic,readwrite,assign) NSInteger maxLength;
 
 @property(nonatomic,readonly) BOOL becameResponder;
+
+-(void)setTouchHandler:(TiUIView*)handler;
 
 @end
 

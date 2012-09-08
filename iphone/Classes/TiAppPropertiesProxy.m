@@ -13,8 +13,31 @@
 
 -(void)dealloc
 {
+	TiThreadPerformOnMainThread(^{
+		[[NSNotificationCenter defaultCenter] removeObserver:self];
+	}, YES);
 	RELEASE_TO_NIL(defaultsObject);
 	[super dealloc];
+}
+
+-(void)_listenerAdded:(NSString*)type count:(int)count
+{
+	if (count == 1 && [type isEqual:@"change"])
+	{
+		TiThreadPerformOnMainThread(^{
+			[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(NSUserDefaultsDidChange) name:NSUserDefaultsDidChangeNotification object:nil];
+		}, YES);
+	}
+}
+
+-(void)_listenerRemoved:(NSString*)type count:(int)count
+{
+	if (count == 0 && [type isEqual:@"change"])
+	{
+		TiThreadPerformOnMainThread(^{
+			[[NSNotificationCenter defaultCenter] removeObserver:self name:NSUserDefaultsDidChangeNotification object:nil];
+		}, YES);
+	}
 }
 
 -(void)_configure
@@ -66,6 +89,12 @@ if (![self propertyExists:key]) return defaultValue; \
 	return [defaultsObject arrayForKey:key];
 }
 
+-(id)getObject:(id)args
+{
+	GETPROP
+	return [defaultsObject dictionaryForKey:key];
+}
+
 #define SETPROP \
 ENSURE_TYPE(args,NSArray);\
 NSString *key = [args objectAtIndex:0];\
@@ -112,6 +141,13 @@ if (value==nil || value==[NSNull null]) {\
 	[defaultsObject synchronize];
 }
 
+-(void)setObject:(id)args
+{
+	SETPROP
+	[defaultsObject setObject:value forKey:key];
+	[defaultsObject synchronize];
+}
+
 -(void)removeProperty:(id)args
 {
 	ENSURE_SINGLE_ARG(args,NSString);
@@ -135,6 +171,11 @@ if (value==nil || value==[NSNull null]) {\
 -(id)listProperties:(id)args
 {
 	return [[defaultsObject dictionaryRepresentation] allKeys];
+}
+
+-(void) NSUserDefaultsDidChange
+{
+	[self fireEvent:@"change" withObject:nil];
 }
 
 @end

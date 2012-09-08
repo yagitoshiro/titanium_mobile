@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -9,7 +9,6 @@ package ti.modules.titanium.ui.widget.tableview;
 import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.TiContext;
 import org.appcelerator.titanium.util.TiConvert;
@@ -33,8 +32,7 @@ import android.view.ViewGroup;
 
 public abstract class TiBaseTableViewItem extends ViewGroup implements Handler.Callback
 {
-	private static final String LCAT = "TiBaseTableViewItem";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TiBaseTableViewItem";
 	
 	private static Bitmap childIndicatorBitmap = null;
 	private static Bitmap checkIndicatorBitmap = null;
@@ -101,7 +99,7 @@ public abstract class TiBaseTableViewItem extends ViewGroup implements Handler.C
 			return new BitmapDrawable(bitmap);
 		} catch (Throwable t) {
 			try {
-				Log.e(LCAT, t.getClass().getName() + ": " + t.getMessage(), t);
+				Log.e(TAG, t.getClass().getName() + ": " + t.getMessage(), t);
 				return null;
 			} catch(Exception e) {
 				// ignore - logging failed
@@ -178,10 +176,12 @@ public abstract class TiBaseTableViewItem extends ViewGroup implements Handler.C
 
 	public void setBackgroundFromProxy(KrollProxy proxy) {
 		Drawable background = null;
-		if (proxy.hasProperty(TiC.PROPERTY_BACKGROUND_IMAGE)) {
-			background = getBackgroundImageDrawable(proxy, proxy.getProperty(TiC.PROPERTY_BACKGROUND_IMAGE).toString());
-		} else if (proxy.hasProperty(TiC.PROPERTY_BACKGROUND_COLOR)) {
-			Integer bgColor = TiConvert.toColor(proxy.getProperty(TiC.PROPERTY_BACKGROUND_COLOR).toString());
+		Object bkgdImage = proxy.getProperty(TiC.PROPERTY_BACKGROUND_IMAGE);
+		Object bkgdColor = proxy.getProperty(TiC.PROPERTY_BACKGROUND_COLOR);
+		if (bkgdImage != null) {
+			background = getBackgroundImageDrawable(proxy, bkgdImage.toString());
+		} else if (bkgdColor != null) {
+			Integer bgColor = TiConvert.toColor(bkgdColor.toString());
 			background = new ColorDrawable(bgColor);
 		}
 

@@ -7,10 +7,12 @@
 package ti.modules.titanium.ui.widget;
 
 import java.util.ArrayList;
+import java.lang.Math;
 
 import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.kroll.common.Log;
+import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.TiConvert;
 import org.appcelerator.titanium.util.TiEventHelper;
@@ -34,9 +36,6 @@ import android.widget.RelativeLayout;
 public class TiUIScrollableView extends TiUIView
 {
 	private static final String TAG = "TiUIScrollableView";
-	private static final String PROPERTY_SHOW_PAGING_CONTROL = "showPagingControl";
-	private static final String PROPERTY_VIEWS = "views";
-	private static final String PROPERTY_CURRENT_PAGE = "currentPage";
 
 	private static final int PAGE_LEFT = 200;
 	private static final int PAGE_RIGHT = 201;
@@ -47,8 +46,8 @@ public class TiUIScrollableView extends TiUIView
 	private final TiCompositeLayout mContainer;
 	private final RelativeLayout mPagingControl;
 
-	private int mCurIndex = -1;
-	private boolean mShowPagingControl = false;
+	private int mCurIndex = 0;
+	private boolean mEnabled = true;
 
 	public TiUIScrollableView(ScrollableViewProxy proxy)
 	{
@@ -69,39 +68,138 @@ public class TiUIScrollableView extends TiUIView
 
 	private ViewPager buildViewPager(Context context, ViewPagerAdapter adapter)
 	{
-		ViewPager pager = new ViewPager(context);
+		ViewPager pager = (new ViewPager(context)
+		{
+			@Override
+			public boolean onTouchEvent(MotionEvent event) {
+				if (mEnabled) {
+					return super.onTouchEvent(event);
+				}
+
+				return false;
+			}
+
+			@Override
+			public boolean onInterceptTouchEvent(MotionEvent event) {
+				if (mEnabled) {
+					return super.onInterceptTouchEvent(event);
+				}
+
+				return false;
+			}
+		});
+
 		pager.setAdapter(adapter);
 		pager.setOnPageChangeListener(new ViewPager.SimpleOnPageChangeListener()
 		{
+			private boolean isValidScroll = false;
+			private boolean justFiredDragEnd = false;
+
 			@Override
-			public void onPageSelected(int position)
+			public void onPageScrollStateChanged(int scrollState)
 			{
-				super.onPageSelected(position);
-				int oldIndex = mCurIndex;
-				mCurIndex = position;
-				if (mCurIndex >= 0) {
-					if (oldIndex >=0 && oldIndex != mCurIndex && oldIndex < mViews.size()) {
-						// Don't know what these focused and unfocused
-						// events are good for, but they were in our previous
-						// scrollable implementation.
-						// cf. https://github.com/appcelerator/titanium_mobile/blob/20335d8603e2708b59a18bafbb91b7292278de8e/android/modules/ui/src/ti/modules/titanium/ui/widget/TiScrollableView.java#L260
-						TiEventHelper.fireFocused(mViews.get(oldIndex));
+				if ((scrollState == ViewPager.SCROLL_STATE_IDLE) && isValidScroll) {
+					int oldIndex = mCurIndex;
+
+					if (mCurIndex >= 0) {
+						if (oldIndex >=0 && oldIndex != mCurIndex && oldIndex < mViews.size()) {
+							// Don't know what these focused and unfocused
+							// events are good for, but they were in our previous
+							// scrollable implementation.
+							// cf. https://github.com/appcelerator/titanium_mobile/blob/20335d8603e2708b59a18bafbb91b7292278de8e/android/modules/ui/src/ti/modules/titanium/ui/widget/TiScrollableView.java#L260
+							TiEventHelper.fireFocused(mViews.get(oldIndex));
+						}
+
+						TiEventHelper.fireUnfocused(mViews.get(mCurIndex));
+						if (oldIndex >= 0) {
+							// oldIndex will be -1 if the view has just
+							// been created and is setting currentPage
+							// to something other than 0. In that case we
+							// don't want a `scrollend` to fire.
+							((ScrollableViewProxy)proxy).fireScrollEnd(mCurIndex, mViews.get(mCurIndex));
+						}
+
+						if (shouldShowPager()) {
+							showPager();
+						}
 					}
-					TiEventHelper.fireUnfocused(mViews.get(mCurIndex));
-					if (oldIndex >= 0) {
-						// oldIndex will be -1 if the view has just
-						// been created and is setting currentPage
-						// to something other than 0. In that case we
-						// don't want a scroll to fire.
-						((ScrollableViewProxy)proxy).fireScroll(mCurIndex);
+
+					// If we don't use this state variable to check if it's a valid
+					// scroll, this event will fire when the view is first created
+					// because on creation, the scroll state is initialized to 
+					// `idle` and this handler is called.
+					isValidScroll = false;
+				} else if (scrollState == ViewPager.SCROLL_STATE_SETTLING) {
+					((ScrollableViewProxy)proxy).fireDragEnd(mCurIndex, mViews.get(mCurIndex));
+
+					// Note that we just fired a `dragend` so the `onPageSelected`
+					// handler below doesn't fire a `scrollend`.  Read below comment.
+					justFiredDragEnd = true;
+				}
+			}
+
+			@Override
+			public void onPageSelected(int page)
+			{
+
+				// If we didn't just fire a `dragend` event then this is the case
+				// where a user drags the view and settles it on a different view.
+				// Since the OS settling logic is never run, the
+				// `onPageScrollStateChanged` handler is never run, and therefore
+				// we forgot to inform the Javascripters that the user just scrolled
+				// their thing.
+
+				if (!justFiredDragEnd && mCurIndex != -1) {
+					((ScrollableViewProxy)proxy).fireScrollEnd(mCurIndex, mViews.get(mCurIndex));
+
+					if (shouldShowPager()) {
+						showPager();
 					}
 				}
-				if (mShowPagingControl) {
-					showPager();
-				}
+			}
+
+			@Override
+			public void onPageScrolled(int positionRoundedDown, float positionOffset, int positionOffsetPixels)
+			{
+				isValidScroll = true;
+
+				// When we touch and drag the view and hold it inbetween the second
+				// and third sub-view, this function will have been called with values
+				// similar to:
+				//		positionRoundedDown:	1
+				//		positionOffset:			 0.5
+				// ie, the first parameter is always rounded down; the second parameter
+				// is always just an offset between the current and next view, it does
+				// not take into account the current view.
+
+				// If we add positionRoundedDown to positionOffset, positionOffset will
+				// have the 'correct' value; ie, will be a natural number when we're on
+				// one particular view, something.5 when inbetween views, etc.
+				float positionFloat = positionOffset + positionRoundedDown;
+
+				// `positionFloat` can now be used to calculate the correct value for
+				// the current index. We add 0.5 so that positionFloat will be rounded
+				// half up; ie, if it has a value of 1.5, it will be rounded up to 2; if
+				// it has a value of 1.4, it will be rounded down to 1.
+				mCurIndex = (int) Math.floor(positionFloat + 0.5);
+				((ScrollableViewProxy)proxy).fireScroll(mCurIndex, positionFloat, mViews.get(mCurIndex));
+
+				// Note that we didn't just fire a `dragend`.  See the above comment
+				// in `onPageSelected`.
+				justFiredDragEnd = false;
 			}
 		});
 		return pager;
+	}
+
+	private boolean shouldShowPager()
+	{
+		Object showPagingControl = proxy.getProperty(TiC.PROPERTY_SHOW_PAGING_CONTROL);
+		if (showPagingControl != null) {
+			return TiConvert.toBoolean(showPagingControl);
+		} else {
+			return false;
+		}
 	}
 
 	private TiCompositeLayout.LayoutParams buildFillLayoutParams()
@@ -126,7 +224,9 @@ public class TiUIScrollableView extends TiUIView
 		left.setOnClickListener(new OnClickListener(){
 			public void onClick(View v)
 			{
-				movePrevious();
+				if (mEnabled) {
+					movePrevious();
+				}
 			}});
 		RelativeLayout.LayoutParams params = new RelativeLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
 		params.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
@@ -142,7 +242,9 @@ public class TiUIScrollableView extends TiUIView
 		right.setOnClickListener(new OnClickListener(){
 			public void onClick(View v)
 			{
-				moveNext();
+				if (mEnabled) {
+					moveNext();
+				}
 			}});
 		params = new RelativeLayout.LayoutParams(LayoutParams.WRAP_CONTENT,
 				LayoutParams.WRAP_CONTENT);
@@ -158,56 +260,65 @@ public class TiUIScrollableView extends TiUIView
 	@Override
 	public void processProperties(KrollDict d)
 	{
-		if (d.containsKey(PROPERTY_VIEWS)) {
-			setViews(d.get(PROPERTY_VIEWS));
+		if (d.containsKey(TiC.PROPERTY_VIEWS)) {
+			setViews(d.get(TiC.PROPERTY_VIEWS));
 		} 
-		if (d.containsKey(PROPERTY_SHOW_PAGING_CONTROL)) {
-			mShowPagingControl = TiConvert.toBoolean(d, PROPERTY_SHOW_PAGING_CONTROL);
-		}
-		if (d.containsKey(PROPERTY_CURRENT_PAGE)) {
-			int page = TiConvert.toInt(d, PROPERTY_CURRENT_PAGE);
+
+		if (d.containsKey(TiC.PROPERTY_CURRENT_PAGE)) {
+			int page = TiConvert.toInt(d, TiC.PROPERTY_CURRENT_PAGE);
 			if (page > 0) {
 				setCurrentPage(page);
-			} else {
-				mCurIndex = 0;
 			}
-		} else {
-			mCurIndex = 0;
+		}
+
+		if (d.containsKey(TiC.PROPERTY_SHOW_PAGING_CONTROL)) {
+			if (TiConvert.toBoolean(d, TiC.PROPERTY_SHOW_PAGING_CONTROL)) {
+				showPager();
+			}
+		}
+
+		if (d.containsKey(TiC.PROPERTY_SCROLLING_ENABLED)) {
+			mEnabled = TiConvert.toBoolean(d, TiC.PROPERTY_SCROLLING_ENABLED);
 		}
 
 		super.processProperties(d);
 
-		if (mShowPagingControl) {
-			showPager();
-		}
 	}
 
 	@Override
 	public void propertyChanged(String key, Object oldValue, Object newValue,
 			KrollProxy proxy)
 	{
-		if(PROPERTY_CURRENT_PAGE.equals(key)) {
+		if (TiC.PROPERTY_CURRENT_PAGE.equals(key)) {
 			setCurrentPage(TiConvert.toInt(newValue));
+		} else if (TiC.PROPERTY_SHOW_PAGING_CONTROL.equals(key)) {
+			boolean show = TiConvert.toBoolean(newValue);
+			if (show) {
+				showPager();
+			} else {
+				hidePager();
+			}
+		} else if (TiC.PROPERTY_SCROLLING_ENABLED.equals(key)) {
+			mEnabled = TiConvert.toBoolean(newValue);
 		} else {
 			super.propertyChanged(key, oldValue, newValue, proxy);
 		}
 	}
 
-	public void setShowPagingControl(boolean show)
-	{
-		mShowPagingControl = show;
-	}
-
 	public void addView(TiViewProxy proxy)
 	{
-		mViews.add(proxy);
-		mAdapter.notifyDataSetChanged();
+		if (!mViews.contains(proxy)) {
+			mViews.add(proxy);
+			getProxy().setProperty(TiC.PROPERTY_VIEWS, mViews.toArray());
+			mAdapter.notifyDataSetChanged();
+		}
 	}
 
 	public void removeView(TiViewProxy proxy)
 	{
 		if (mViews.contains(proxy)) {
 			mViews.remove(proxy);
+			getProxy().setProperty(TiC.PROPERTY_VIEWS, mViews.toArray());
 			mAdapter.notifyDataSetChanged();
 		}
 	}
@@ -250,6 +361,7 @@ public class TiUIScrollableView extends TiUIView
 			Log.w(TAG, "Request to move to index " + index+ " ignored, as it is out-of-bounds.");
 			return;
 		}
+		mCurIndex = index;
 		mPager.setCurrentItem(index);
 	}
 
@@ -270,6 +382,16 @@ public class TiUIScrollableView extends TiUIView
 	public void setCurrentPage(Object view)
 	{
 		scrollTo(view);
+	}
+
+	public void setEnabled(Object value)
+	{
+		mEnabled = TiConvert.toBoolean(value);
+	}
+
+	public boolean getEnabled()
+	{
+		return mEnabled;
 	}
 
 	private void clearViewsList()
@@ -327,11 +449,9 @@ public class TiUIScrollableView extends TiUIView
 
 	public static class ViewPagerAdapter extends PagerAdapter
 	{
-		private final Activity mActivity;
 		private final ArrayList<TiViewProxy> mViewProxies;
 		public ViewPagerAdapter(Activity activity, ArrayList<TiViewProxy> viewProxies)
 		{
-			mActivity = activity;
 			mViewProxies = viewProxies;
 		}
 
@@ -402,7 +522,7 @@ public class TiUIScrollableView extends TiUIView
 	{
 		public TiViewPagerLayout(Context context)
 		{
-			super(context);
+			super(context, proxy);
 			setFocusable(true);
 			setFocusableInTouchMode(true);
 			setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
@@ -412,7 +532,7 @@ public class TiUIScrollableView extends TiUIView
 		public boolean onTrackballEvent(MotionEvent event)
 		{
 			// Any trackball activity should show the pager.
-			if (mShowPagingControl && mPagingControl.getVisibility() != View.VISIBLE) {
+			if (shouldShowPager() && mPagingControl.getVisibility() != View.VISIBLE) {
 				showPager();
 			}
 			return super.onTrackballEvent(event);

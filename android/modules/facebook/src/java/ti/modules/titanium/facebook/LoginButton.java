@@ -1,16 +1,16 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
-
 package ti.modules.titanium.facebook;
 
 import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.common.Log;
 import org.appcelerator.titanium.TiApplication;
 import org.appcelerator.titanium.proxy.TiViewProxy;
+import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.util.TiConvert;
 import org.appcelerator.titanium.view.TiUIView;
 
@@ -26,7 +26,7 @@ import android.widget.ImageButton;
 
 public class LoginButton extends TiUIView implements TiFacebookStateListener
 {
-	private static final String LCAT = "TiLoginButton";
+	private static final String TAG = "TiLoginButton";
 	private static final int FB_BLUE = 0xFF6D84B4;
 	private FacebookModule facebook = null;
 	private boolean wide;
@@ -124,7 +124,7 @@ public class LoginButton extends TiUIView implements TiFacebookStateListener
 			btn.setBackgroundColor(Color.TRANSPARENT);
 			btn.setImageResource(resid);
 		} else {
-			Log.w(LCAT, "Facebook resource image could not be located!  State: " + stateDescription);
+			Log.w(TAG, "Facebook resource image could not be located!  State: " + stateDescription);
 			// At least give it a "facebook blue" background so it can be seen.
 			btn.setBackgroundColor(FB_BLUE);
 		}
@@ -136,11 +136,20 @@ public class LoginButton extends TiUIView implements TiFacebookStateListener
 
 		facebook.addListener(this);
 
-		if (d.containsKey("style")) {
-			String style = TiConvert.toString(d, "style");
-			if (style.equals("wide")) {
-				wide = true;
-				updateButtonImage(false);
+		if (d.containsKey(TiC.PROPERTY_STYLE)) {
+			Object style = d.get(TiC.PROPERTY_STYLE);
+			if (style instanceof Number) {
+				int styleValue = TiConvert.toInt(style);
+				if (styleValue == facebook.BUTTON_STYLE_WIDE) {
+					wide = true;
+					updateButtonImage(false);
+				}
+			} else {
+				String styleName = TiConvert.toString(style);
+				if (styleName.equals("wide")) {
+					wide = true;
+					updateButtonImage(false);
+				}
 			}
 		}
 	}
@@ -173,22 +182,19 @@ public class LoginButton extends TiUIView implements TiFacebookStateListener
 			final ImageButton btn = (ImageButton) view;
 			btn.setOnClickListener(new OnClickListener() {
 				public void onClick(View arg0) {
-					Activity activity = null;
-					if (btn.getContext() instanceof Activity) {
-						activity = (Activity) btn.getContext();
-					} else {
-						Context context = getProxy().getActivity();
-						if (context instanceof Activity) {
-							activity = (Activity) context;
-						}
-					}
-					if (activity == null) {
-						// Fallback on the root activity if possible
-						activity = TiApplication.getInstance().getRootActivity();
-					}
 					if (facebook.getLoggedIn()) {
-						facebook.executeLogout(activity);
+						facebook.executeLogout();
 					} else {
+						Activity activity = null;
+						if (btn.getContext() instanceof Activity) {
+							activity = (Activity) btn.getContext();
+						} else {
+							activity = getProxy().getActivity();
+						}
+						if (activity == null) {
+							// Fallback on the root activity if possible
+							activity = TiApplication.getInstance().getRootActivity();
+						}
 						facebook.executeAuthorize(activity);
 					}
 				}

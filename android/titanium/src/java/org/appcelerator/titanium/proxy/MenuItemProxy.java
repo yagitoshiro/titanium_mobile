@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -8,21 +8,47 @@ package org.appcelerator.titanium.proxy;
 
 import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.kroll.annotations.Kroll;
+import org.appcelerator.kroll.common.Log;
+import org.appcelerator.kroll.common.TiMessenger;
+import org.appcelerator.titanium.TiApplication;
+import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.util.TiConvert;
 import org.appcelerator.titanium.util.TiFileHelper;
 import org.appcelerator.titanium.util.TiUIHelper;
+import org.appcelerator.titanium.util.TiUrl;
 
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.view.MenuItem;
+import android.view.MenuItem.OnActionExpandListener;
+import android.view.View;
 
 @Kroll.proxy
-public class MenuItemProxy extends KrollProxy 
+public class MenuItemProxy extends KrollProxy
 {
+	private static final String TAG = "MenuItem";
+
 	private MenuItem item;
-	
+
+	private final class ActionExpandListener implements OnActionExpandListener {
+		public boolean onMenuItemActionCollapse(MenuItem item) {
+			fireEvent(TiC.EVENT_COLLAPSE, null);
+			return true;
+		}
+
+		public boolean onMenuItemActionExpand(MenuItem item) {
+			fireEvent(TiC.EVENT_EXPAND, null);
+			return true;
+		}
+	}
+
 	protected MenuItemProxy(MenuItem item)
 	{
 		this.item = item;
+
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
+			item.setOnActionExpandListener(new ActionExpandListener());
+		}
 	}
 
 	@Kroll.method @Kroll.getProperty
@@ -99,9 +125,10 @@ public class MenuItemProxy extends KrollProxy
 		if (icon != null) {
 			if (icon instanceof String) {
 				String iconPath = TiConvert.toString(icon);
+				TiUrl iconUrl = new TiUrl(iconPath);
 				if (iconPath != null) {
-					TiFileHelper tfh = new TiFileHelper(getActivity());
-					Drawable d = tfh.loadDrawable(iconPath, false);
+					TiFileHelper tfh = new TiFileHelper(TiApplication.getInstance());
+					Drawable d = tfh.loadDrawable(iconUrl.resolve(), false);
 					if (d != null) {
 						item.setIcon(d);
 					}
@@ -132,5 +159,65 @@ public class MenuItemProxy extends KrollProxy
 	public MenuItemProxy setVisible(boolean visible) {
 		item.setVisible(visible);
 		return this;
+	}
+
+	@Kroll.setProperty
+	public void setActionView(TiViewProxy view) {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
+			View v = view.getOrCreateView().getNativeView();
+			item.setActionView(v);
+
+		} else {
+			Log.i(TAG, "Action bar not available on this device. Ignoring actionView property.", Log.DEBUG_MODE);
+		}
+	}
+
+	@Kroll.setProperty
+	public void setShowAsAction(int flag) {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
+			item.setShowAsAction(flag);
+
+		} else {
+			Log.i(TAG, "Action bar unsupported by this device. Ignoring showAsAction property.", Log.DEBUG_MODE);
+		}
+	}
+
+	@Kroll.method
+	public void collapseActionView() {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
+			TiMessenger.postOnMain(new Runnable() {
+				public void run() {
+					item.collapseActionView();
+				}
+			});
+
+		} else {
+			Log.i(TAG, "This device does not support collapsing action views. No operation performed.", Log.DEBUG_MODE);
+		}
+	}
+
+	@Kroll.method
+	public void expandActionView() {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
+			TiMessenger.postOnMain(new Runnable() {
+				public void run() {
+					item.expandActionView();
+				}
+			});
+
+		} else {
+			Log.i(TAG, "This device does not support expanding action views. No operation performed.", Log.DEBUG_MODE);
+		}
+	}
+
+	@Kroll.getProperty
+	public boolean isActionViewExpanded() {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
+			return item.isActionViewExpanded();
+		}
+
+		// If this system does not support expandable action views, we will
+		// always return false since the menu item can never "expand".
+		return false;
 	}
 }

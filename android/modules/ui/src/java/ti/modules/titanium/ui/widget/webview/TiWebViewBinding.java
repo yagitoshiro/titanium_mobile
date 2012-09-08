@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -10,35 +10,59 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.HashMap;
+import java.util.Stack;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.KrollEventCallback;
 import org.appcelerator.kroll.KrollLogging;
+import org.appcelerator.kroll.KrollModule;
 import org.appcelerator.kroll.common.Log;
+import org.appcelerator.titanium.TiApplication;
 import org.appcelerator.titanium.TiContext;
+import org.appcelerator.titanium.util.TiConvert;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import android.webkit.WebView;
 
-public class TiWebViewBinding {
+public class TiWebViewBinding
+{
 
-	private static final String LCAT = "TiWebViewBinding";
-	// This is based on binding.min.js.  If you have to change anything...
+	private static final String TAG = "TiWebViewBinding";
+	// This is based on binding.min.js. If you have to change anything...
 	// - change binding.js
 	// - minify binding.js to create binding.min.js
 	protected final static String SCRIPT_INJECTION_ID = "__ti_injection";
 	protected final static String INJECTION_CODE;
+
+	// This is based on polling.min.js. If you have to change anything...
+	// - change polling.js
+	// - minify polling.js to create polling.min.js
+	protected static String POLLING_CODE = "";
 	static {
 		StringBuilder jsonCode = readResourceFile("json2.js");
 		StringBuilder tiCode = readResourceFile("binding.min.js");
+		StringBuilder pollingCode = readResourceFile("polling.min.js");
+
+		if (pollingCode == null) {
+			Log.w(TAG, "Unable to read polling code");
+		} else {
+			POLLING_CODE = pollingCode.toString();
+		}
+
 		StringBuilder allCode = new StringBuilder();
 		allCode.append("\n<script id=\"" + SCRIPT_INJECTION_ID + "\">\n");
 		if (jsonCode == null) {
-			Log.w(LCAT, "Unable to read JSON code for injection");
+			Log.w(TAG, "Unable to read JSON code for injection");
 		} else {
 			allCode.append(jsonCode);
 		}
 
 		if (tiCode == null) {
-			Log.w(LCAT, "Unable to read Titanium binding code for injection");
+			Log.w(TAG, "Unable to read Titanium binding code for injection");
 		} else {
 			allCode.append("\n");
 			allCode.append(tiCode.toString());
@@ -50,19 +74,19 @@ public class TiWebViewBinding {
 		allCode = null;
 	}
 
-	private WebView webView;
+	private Stack<String> codeSnippets;
+	private boolean destroyed;
+
 	private KrollLogging apiBinding;
-	//private AppBinding appBinding;
-	
+	private AppBinding appBinding;
+
 	public TiWebViewBinding(WebView webView)
 	{
-		this.webView = webView;
+		codeSnippets = new Stack<String>();
 
 		apiBinding = KrollLogging.getDefault();
-		/*apiBinding = new APIBinding();
 		appBinding = new AppBinding();
-		webView.addJavascriptInterface(apiBinding, "TiAPI");
-		webView.addJavascriptInterface(appBinding, "TiApp");*/
+		webView.addJavascriptInterface(appBinding, "TiApp");
 		webView.addJavascriptInterface(apiBinding, "TiAPI");
 		webView.addJavascriptInterface(new TiReturn(), "_TiReturn");
 	}
@@ -72,129 +96,118 @@ public class TiWebViewBinding {
 		this(webView);
 	}
 
-	public void destroy() {
+	public void destroy()
+	{
+		// remove any event listener that have already been added to the Ti.APP through
+		// this web view instance
+		appBinding.clearEventListeners();
+
+		returnSemaphore.release();
+		codeSnippets.clear();
+		destroyed = true;
 	}
-	
+
 	private static StringBuilder readResourceFile(String fileName)
 	{
-		InputStream stream = TiWebViewBinding.class.getClassLoader().getResourceAsStream("ti/modules/titanium/ui/widget/webview/" + fileName);
+		InputStream stream = TiWebViewBinding.class.getClassLoader().getResourceAsStream(
+			"ti/modules/titanium/ui/widget/webview/" + fileName);
 		BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
 		StringBuilder code = new StringBuilder();
 		try {
 			for (String line = reader.readLine(); line != null; line = reader.readLine()) {
-				code.append(line+"\n");
+				code.append(line + "\n");
 			}
 		} catch (IOException e) {
-			Log.e(LCAT, "Error reading input stream", e);
+			Log.e(TAG, "Error reading input stream", e);
 			return null;
 		} finally {
 			if (stream != null) {
 				try {
 					stream.close();
 				} catch (IOException e) {
-					Log.w(LCAT, "Problem closing input stream.", e);
+					Log.w(TAG, "Problem closing input stream.", e);
 				}
 			}
 		}
 		return code;
 	}
-	
-	private void evalJS(String code)
-	{
-		webView.loadUrl("javascript:"+code);
-	}
-	
+
 	private Semaphore returnSemaphore = new Semaphore(0);
 	private String returnValue;
-	public String getJSValue(String expression)
+
+	synchronized public String getJSValue(String expression)
 	{
-		String code = "javascript:_TiReturn.setValue((function(){try{return "+expression+"+\"\";}catch(ti_eval_err){return '';}})());";
-		Log.d(LCAT, "getJSValue:"+code);
-		webView.loadUrl(code);
-		try {
-			returnSemaphore.acquire();
-			return returnValue;
-		} catch (InterruptedException e) {
-			Log.e(LCAT, "Interrupted", e);
+		// Don't try to evaluate js code again if the binding has already been destroyed
+		if (!destroyed) {
+			String code = "_TiReturn.setValue((function(){try{return " + expression
+				+ "+\"\";}catch(ti_eval_err){return '';}})());";
+			Log.d(TAG, "getJSValue:" + code, Log.DEBUG_MODE);
+			synchronized (codeSnippets) {
+				codeSnippets.push(code);
+			}
+			try {
+				if (!returnSemaphore.tryAcquire(3500, TimeUnit.MILLISECONDS)) {
+					Log.w(TAG, "Timeout waiting to evaluate JS");
+				}
+				return returnValue;
+			} catch (InterruptedException e) {
+				Log.e(TAG, "Interrupted", e);
+			}
 		}
 		return null;
 	}
-	
+
 	@SuppressWarnings("unused")
-	private class TiReturn {
-		public void setValue(String value) {
+	private class TiReturn
+	{
+		public void setValue(String value)
+		{
 			if (value != null) {
 				returnValue = value;
 			}
 			returnSemaphore.release();
 		}
 	}
-	
-	/*@SuppressWarnings("serial")
-	private class WebViewCallback implements KrollFunction
+
+	private class WebViewCallback implements KrollEventCallback
 	{
 		private int id;
-		public WebViewCallback(int id) {
+
+		public WebViewCallback(int id)
+		{
 			this.id = id;
 		}
-		
-		@Override
-		public Object call(KrollObject thisObject, Object[] args) {
-			if (args.length > 0 && args[0] instanceof KrollDict) {
-				KrollDict data = (KrollDict) args[0];
-				String code = "Ti.executeListener("+id+", "+data.toString()+");";
-				evalJS(code);
+
+		public void call(Object data)
+		{
+			String dataString;
+			if (data == null) {
+				dataString = "";
+			} else if (data instanceof HashMap) {
+				JSONObject json = TiConvert.toJSON((HashMap) data);
+				dataString = ", " + String.valueOf(json);
+			} else {
+				dataString = ", " + String.valueOf(data);
 			}
-			return 0; // TODO: return undefined instead
-		}
-	}*/
 
-	/*@SuppressWarnings("unused")
-	private class APIBinding
-	{
-		private APIModule module;
-		public APIBinding() {
-			module = (APIModule) TiApplication.getInstance().getModuleByName("API");
+			String code = "Ti.executeListener(" + id + dataString + ");";
+			synchronized (codeSnippets) {
+				codeSnippets.push(code);
+			}
 		}
-		public void critical(String msg) {
-			module.critical(msg);
-		}
-		public void debug(String msg) {
-			module.debug(msg);
-		}
-		public void error(String msg) {
-			module.error(msg);
-		}
-		public void fatal(String msg) {
-			module.fatal(msg);
-		}
-		public void info(String msg) {
-			module.info(msg);
-		}
-		public void log(String level, String msg) {
-			module.log(level, msg);
-		}
-		public void notice(String msg) {
-			module.notice(msg);
-		}
-		public void trace(String msg) {
-			module.trace(msg);
-		}
-		public void warn(String msg) {
-			module.warn(msg);
-		}
-	}*/
+	}
 
-	/*@SuppressWarnings("unused")
+	@SuppressWarnings("unused")
 	private class AppBinding
 	{
-		private AppModule module;
-		
+		private KrollModule module;
+		private HashMap<String, Integer> appListeners = new HashMap<String, Integer>();
+
 		public AppBinding()
 		{
-			module = (AppModule) TiApplication.getInstance().getModuleByName("App");
+			module = TiApplication.getInstance().getModuleByName("App");
 		}
-		
+
 		public void fireEvent(String event, String json)
 		{
 			try {
@@ -204,23 +217,43 @@ public class TiWebViewBinding {
 				}
 				module.fireEvent(event, dict);
 			} catch (JSONException e) {
-				Log.e(LCAT, "Error parsing event JSON", e);
+				Log.e(TAG, "Error parsing event JSON", e);
 			}
 		}
-		
+
 		public int addEventListener(String event, int id)
 		{
-			KrollInvocation invocation = KrollInvocation.createMethodInvocation(module.getTiContext(), module.getTiContext().getScope(), null, "addEventListener", null, module);
-			int listenerId = module.addEventListener(invocation, event, new WebViewCallback(id));
-			invocation.recycle();
-			return listenerId;
+			WebViewCallback callback = new WebViewCallback(id);
+
+			int result = module.addEventListener(event, callback);
+			appListeners.put(event, result);
+
+			return result;
 		}
-		
+
 		public void removeEventListener(String event, int id)
 		{
-			KrollInvocation invocation = KrollInvocation.createMethodInvocation(module.getTiContext(), module.getTiContext().getScope(), null, "removeEventListener", null, module);
-			module.removeEventListener(invocation, event, id);
-			invocation.recycle();
+			module.removeEventListener(event, id);
 		}
-	}*/
+
+		public void clearEventListeners()
+		{
+			for (String event : appListeners.keySet()) {
+				removeEventListener(event, appListeners.get(event));
+			}
+		}
+
+		public String getJSCode()
+		{
+			if (destroyed) {
+				return null;
+			}
+
+			String code;
+			synchronized (codeSnippets) {
+				code = codeSnippets.empty() ? "" : codeSnippets.pop();
+			}
+			return code;
+		}
+	}
 }

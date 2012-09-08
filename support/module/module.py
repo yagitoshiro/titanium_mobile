@@ -48,7 +48,7 @@ class ModulePlatform(object):
 class ModuleProject(object):
 	def __init__(self,platform,project_dir,config):
 		self.project_short_name = config['name']
-		self.project_name = config['name'].lower()
+		self.project_name = config['name']
 		self.platform = platform
 		self.module_id = config['id']
 		self.module_name = self.generate_module_name(self.module_id)
@@ -81,8 +81,10 @@ class ModuleProject(object):
 		string = string.replace('___PROJECTNAME___',self.project_name)
 		string = string.replace('__MODULE_ID__',self.module_id)
 		string = string.replace('__PROJECT_SHORT_NAME__',self.project_short_name)
+		string = string.replace('__PROJECT_SHORT_NAME_LOWER__',self.project_short_name.lower())
 		string = string.replace('__VERSION__',self.sdk_version)
 		string = string.replace('__SDK__',sdk_dir)
+		string = string.replace('__SDK_ROOT__',os.path.split(sdk_dir)[0].replace(os.path.expanduser('~'),'~',1))
 		string = string.replace('__PLATFORM__',self.platform)
 		string = string.replace('__GUID__',self.guid)
 		string = string.replace('__YEAR__', str(date.today().year))
@@ -145,9 +147,16 @@ class Module(object):
 		self.manifest = manifest
 
 		self.jar = None
-		module_jar = self.get_resource(manifest.name+'.jar')
+		module_jar = self.get_resource(manifest.name + '.jar')
 		if os.path.exists(module_jar):
 			self.jar = module_jar
+		else:
+			# To account for Linux filename case-sensitivity,
+			# we began to force our external module jars to be lower-case,
+			# so give that a shot here.
+			module_jar = self.get_resource(manifest.name.lower() + '.jar')
+			if os.path.exists(module_jar):
+				self.jar = module_jar
 		self.lib = None
 
 		module_lib = self.get_resource('lib%s.a' % manifest.moduleid)
@@ -158,6 +167,11 @@ class Module(object):
 		module_xml = self.get_resource('timodule.xml')
 		if os.path.exists(module_xml):
 			self.xml = TiAppXML(module_xml, parse_only=True)
+
+		self.js = None
+		module_js = self.get_resource('%s.js' % manifest.moduleid)
+		if os.path.exists(module_js):
+			self.js = module_js
 	
 	def get_resource(self, *path):
 		return os.path.join(self.path, *path)
@@ -199,8 +213,9 @@ class ModuleDetector(object):
 			if not os.path.isdir(platform_dir): continue
 			if platform in ['osx', 'win32', 'linux']: continue # skip desktop modules
 			
-			# recursive once in the platform directory so we can get versioned modules too
+			# iterate through the platform directory so we can get versioned modules too
 			for root, dirs, files in os.walk(platform_dir):
+				dirs.sort(reverse=True)
 				for module_dir in dirs:
 					module_dir = os.path.join(root, module_dir)
 					manifest_file = os.path.join(module_dir, 'manifest')
@@ -232,13 +247,17 @@ class ModuleDetector(object):
 		if 'modules' not in tiapp.properties: return missing, modules
 		
 		for module_dep in tiapp.properties['modules']:
-			if not self.is_any(module_dep, 'platform') and platform != module_dep['platform']:
+			module_platform = module_dep.get('platform')
+			if not self.is_any(module_dep, 'platform') and \
+			       module_platform != 'commonjs' and \
+			       module_platform != platform:
 				continue
 			version_desc = self.get_desc(module_dep, 'version')
 			platform_desc = self.get_desc(module_dep, 'platform')
 			print '[DEBUG] Looking for Titanium Module id: %s, version: %s, platform: %s' % (module_dep['id'], version_desc, platform_desc)
 			module = self.find_module(id=module_dep['id'], version=module_dep['version'], platform=module_dep['platform'])
 			if module == None:
+				print '[WARN] Could not find Titanium Module id: %s, version: %s, platform: %s' % (module_dep['id'], version_desc, platform_desc)
 				missing.append(module_dep)
 			else:
 				modules.append(module)

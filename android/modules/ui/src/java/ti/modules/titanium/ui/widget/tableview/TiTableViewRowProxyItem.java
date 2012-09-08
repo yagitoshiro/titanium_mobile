@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -11,7 +11,6 @@ import java.util.HashMap;
 
 import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.TiContext;
 import org.appcelerator.titanium.TiDimension;
@@ -34,8 +33,7 @@ import android.widget.ImageView;
 
 public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 {
-	private static final String LCAT = "TitaniumTableViewItem";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TitaniumTableViewItem";
 
 	private static final int LEFT_MARGIN = 5;
 	private static final int RIGHT_MARGIN = 7;
@@ -60,7 +58,6 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 		addView(leftImage, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
 
 		this.content = new TiCompositeLayout(activity);
-		content.setMinimumHeight(48);
 		addView(content, new LayoutParams(LayoutParams.FILL_PARENT, LayoutParams.FILL_PARENT));
 
 		this.rightImage = new ImageView(activity);
@@ -89,9 +86,7 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 	}
 
 	protected TiViewProxy addViewToOldRow(int index, TiUIView titleView, TiViewProxy newViewProxy) {
-		if (DBG) {
-			Log.w(LCAT, newViewProxy + " was added an old style row, reusing the title TiUILabel");
-		}
+		Log.w(TAG, newViewProxy + " was added an old style row, reusing the title TiUILabel", Log.DEBUG_MODE);
 		LabelProxy label = new LabelProxy();
 		label.handleCreationDict(titleView.getProxy().getProperties());
 		label.setView(titleView);
@@ -164,6 +159,8 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 		for (TiUIView childView : view.getChildren()) {
 			TiViewProxy childProxy = childProxies[i];
 			childView.setProxy(childProxy);
+			//Since we wipe out children's views earlier we need to reset them.
+			childProxy.setView(childView);
 			childView.processProperties(childProxy.getProperties());
 			applyChildProxies(childProxy, childView);
 			i++;
@@ -267,7 +264,8 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 		}
 
 		if (props.containsKey(TiC.PROPERTY_HEIGHT)) {
-			if (!props.get(TiC.PROPERTY_HEIGHT).equals(TiC.SIZE_AUTO)) {
+			if (!props.get(TiC.PROPERTY_HEIGHT).equals(TiC.SIZE_AUTO)
+				&& !props.get(TiC.PROPERTY_HEIGHT).equals(TiC.LAYOUT_SIZE)) {
 				height = TiConvert.toTiDimension(TiConvert.toString(props, TiC.PROPERTY_HEIGHT), TiDimension.TYPE_HEIGHT);
 			}
 		}
@@ -324,6 +322,15 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 		//int adjustedWidth = w;
 
 		if (content != null) {
+			
+			// If there is a child view, we don't set a minimum height for the row.
+			// Otherwise, we set a minimum height.
+			if (((TableViewRowProxy)item.proxy).hasControls()) {
+				content.setMinimumHeight(0);
+			} else {
+				content.setMinimumHeight(48);
+			}
+			
 			measureChild(content, MeasureSpec.makeMeasureSpec(adjustedWidth, wMode), heightMeasureSpec);
 			if(hMode == MeasureSpec.UNSPECIFIED) {
 				TableViewProxy table = ((TableViewRowProxy)item.proxy).getTable();
@@ -338,9 +345,7 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 				} else {
 					h = Math.max(minRowHeight, height.getAsPixels(this));
 				}
-				if (DBG) {
-					Log.d(LCAT, "Row content measure (" + adjustedWidth + "x" + h + ")");
-				}
+				Log.d(TAG, "Row content measure (" + adjustedWidth + "x" + h + ")", Log.DEBUG_MODE);
 				measureChild(content, MeasureSpec.makeMeasureSpec(adjustedWidth, wMode), MeasureSpec.makeMeasureSpec(h, hMode));
 			}
 		}

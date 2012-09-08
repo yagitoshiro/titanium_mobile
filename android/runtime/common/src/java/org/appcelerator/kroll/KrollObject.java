@@ -14,10 +14,11 @@ import org.appcelerator.kroll.common.TiMessenger;
 import android.os.Handler;
 import android.os.Message;
 
-
+/**
+ * This class maintains a reference between the JavaScript and Java objects.
+ */
 public abstract class KrollObject implements Handler.Callback
 {
-	private static final String TAG = "KrollObject";
 
 	protected static final int MSG_RELEASE = 100;
 	protected static final int MSG_SET_WINDOW = 101;
@@ -33,11 +34,20 @@ public abstract class KrollObject implements Handler.Callback
 		handler = new Handler(TiMessenger.getRuntimeMessenger().getLooper(), this);	
 	}
 
+	/**
+	 * Sets the Proxy associated with this object.
+	 * @param proxySupport the Proxy to be set.
+	 */
 	public void setProxySupport(KrollProxySupport proxySupport)
 	{
 		this.proxySupport = proxySupport;
 	}
 
+	/**
+	 * Checks to see if this object has event listeners added.
+	 * @param event the event name to check.
+	 * @return whether this object has an eventListener for this event.
+	 */
 	public boolean hasListeners(String event)
 	{
 		Boolean hasListeners = hasListenersForEventType.get(event);
@@ -48,6 +58,11 @@ public abstract class KrollObject implements Handler.Callback
 		return hasListeners.booleanValue();
 	}
 
+	/**
+	 * Sets whether the passed in event has a corresponding eventListener associated with it on JS side.
+	 * @param event  the event to be set.
+	 * @param hasListeners  If this is true, then the passed in event has a javascript event listener, false otherwise.
+	 */
 	public void setHasListenersForEventType(String event, boolean hasListeners)
 	{
 		hasListenersForEventType.put(event, hasListeners);
@@ -56,6 +71,47 @@ public abstract class KrollObject implements Handler.Callback
 		}
 	}
 
+	/**
+	 * This is used to notify Java side when JS fires an event. Right now only webView uses this.
+	 * @param event the event fired.
+	 * @param data  the event data.
+	 */
+	public void onEventFired(String event, Object data)
+	{
+		if (proxySupport != null) {
+			proxySupport.onEventFired(event, data);
+		}
+	}
+
+	/**
+	 * Call a function referenced by a property on this object.
+	 *
+	 * <p>
+	 * For example if we have the following JavaScript:
+	 *   <pre>
+	 *   math.add = function(x, y) { return a + b; }
+	 *   </pre>
+	 *
+	 * To call the "add" function on the "math" object from Java:
+	 *   <pre>
+	 *   Number sum = (Number) krollObject.callProperty("add", new Object[] { 1, 2});
+	 *   </pre>
+	 * </p>
+	 *
+	 * <p>
+	 * If the property does not reference a function this method
+	 * will return the {@link KrollRuntime.UNDEFINED} value.
+	 * </p>
+	 *
+	 * @param propertyName name of the property that references the function to call
+	 * @param args the arguments to pass when calling function
+	 * @return the value returned by the function call
+	 */
+	public abstract Object callProperty(String propertyName, Object[] args);
+
+	/**
+	 * Releases this KrollObject, that is, removes event listeners and any associated native views or content.	
+	 */
 	protected void release()
 	{
 		if (KrollRuntime.getInstance().isRuntimeThread()) {

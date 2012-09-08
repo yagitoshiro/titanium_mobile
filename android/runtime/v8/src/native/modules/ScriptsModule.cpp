@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2011-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -14,6 +14,7 @@
 #include "V8Util.h"
 #include "JNIUtil.h"
 #include "TypeConverter.h"
+#include "JSException.h"
 
 #define TAG "ScriptsModule"
 
@@ -21,77 +22,44 @@ namespace titanium {
 using namespace v8;
 
 Persistent<FunctionTemplate> WrappedScript::constructor_template;
-Persistent<FunctionTemplate> WrappedContext::constructor_template;
+Persistent<ObjectTemplate> WrappedContext::global_template;
 
 void WrappedContext::Initialize(Handle<Object> target)
 {
 	HandleScope scope;
 
-	constructor_template = Persistent<FunctionTemplate>::New(FunctionTemplate::New(WrappedContext::New));
-	constructor_template->InstanceTemplate()->SetInternalFieldCount(1);
-	constructor_template->SetClassName(String::NewSymbol("Context"));
-
-	target->Set(String::NewSymbol("Context"), constructor_template->GetFunction());
+	global_template = Persistent<ObjectTemplate>::New(ObjectTemplate::New());
+	global_template->SetInternalFieldCount(1);
 }
 
-Handle<Value> WrappedContext::New(const Arguments& args)
+WrappedContext* WrappedContext::Unwrap(Handle<Object> global)
 {
 	HandleScope scope;
-
-	WrappedContext *t = new WrappedContext();
-	t->Wrap(args.This());
-
-	return args.This();
-}
-
-WrappedContext::WrappedContext()
-	: NativeObject()
-{
-	context_ = Context::New();
+	return NativeObject::Unwrap<WrappedContext>(global->GetPrototype().As<Object>());
 }
 
 WrappedContext::WrappedContext(Persistent<Context> context)
-	: NativeObject()
+	: context_(context)
 {
-	context_ = context;
+	HandleScope scope;
+
+	Local<Object> globalProxy = context->Global();
+	Local<Object> global = globalProxy->GetPrototype().As<Object>();
+	Wrap(global);
 }
 
 WrappedContext::~WrappedContext()
 {
-	context_.Dispose();
-	if (!initCallback_.IsEmpty()) {
-		initCallback_.Dispose();
+	if (!context_.IsEmpty()) {
+		context_->DetachGlobal();
+		context_.Dispose();
+		context_.Clear();
 	}
-}
-
-Local<Object> WrappedContext::NewInstance()
-{
-	Local<Object> context = constructor_template->GetFunction()->NewInstance();
-	return context;
 }
 
 Persistent<Context> WrappedContext::GetV8Context()
 {
 	return context_;
-}
-
-Persistent<Function> WrappedContext::GetInitCallback()
-{
-	return initCallback_;
-}
-
-void WrappedContext::SetInitCallback(Persistent<Function> initCallback)
-{
-	initCallback_ = initCallback;
-}
-
-Handle<Object> WrappedContext::WrapContext(Persistent<Context> context)
-{
-	HandleScope scope;
-	WrappedContext *t = new WrappedContext(context);
-	Local<Object> wrappedContext = WrappedContext::NewInstance();
-	t->Wrap(wrappedContext);
-	return scope.Close(wrappedContext);
 }
 
 void WrappedScript::Initialize(Handle<Object> target)
@@ -102,12 +70,12 @@ void WrappedScript::Initialize(Handle<Object> target)
 	constructor_template->InstanceTemplate()->SetInternalFieldCount(1);
 	constructor_template->SetClassName(String::NewSymbol("Script"));
 
-	DEFINE_PROTOTYPE_METHOD(constructor_template, "createContext", WrappedScript::CreateContext);
 	DEFINE_PROTOTYPE_METHOD(constructor_template, "runInContext", WrappedScript::RunInContext);
 	DEFINE_PROTOTYPE_METHOD(constructor_template, "runInThisContext", WrappedScript::RunInThisContext);
 	DEFINE_PROTOTYPE_METHOD(constructor_template, "runInNewContext", WrappedScript::RunInNewContext);
 
 	DEFINE_METHOD(constructor_template, "createContext", WrappedScript::CreateContext);
+	DEFINE_METHOD(constructor_template, "disposeContext", WrappedScript::DisposeContext);
 	DEFINE_METHOD(constructor_template, "runInContext", WrappedScript::CompileRunInContext);
 	DEFINE_METHOD(constructor_template, "runInThisContext", WrappedScript::CompileRunInThisContext);
 	DEFINE_METHOD(constructor_template, "runInNewContext", WrappedScript::CompileRunInNewContext);
@@ -135,9 +103,15 @@ WrappedScript::~WrappedScript()
 Handle<Value> WrappedScript::CreateContext(const Arguments& args)
 {
 	HandleScope scope;
-	Local<Object> context = WrappedContext::NewInstance();
-	WrappedContext *wrappedContext = NativeObject::Unwrap<WrappedContext>(context);
 
+	Persistent<Context> context = Context::New(NULL, WrappedContext::global_template);
+	WrappedContext *wrappedContext = new WrappedContext(context);
+	Local<Object> global = context->Global();
+
+	// Allow current context access to newly created context's objects.
+	context->SetSecurityToken(Context::GetCurrent()->GetSecurityToken());
+
+	// If a sandbox is provided initial the new context's global with it.
 	if (args.Length() > 0) {
 		Local<Object> sandbox = args[0]->ToObject();
 		Local<Array> keys = sandbox->GetPropertyNames();
@@ -146,20 +120,25 @@ Handle<Value> WrappedScript::CreateContext(const Arguments& args)
 			Handle<String> key = keys->Get(Integer::New(i))->ToString();
 			Handle<Value> value = sandbox->Get(key);
 			if (value == sandbox) {
-				value = context;
+				value = global;
 			}
-			context->Set(key, value);
-		}
-
-		if (args.Length() > 1 && args[1]->IsFunction()) {
-			wrappedContext->SetInitCallback(Persistent<Function>::New(Handle<Function>::Cast(args[1])));
+			global->Set(key, value);
 		}
 	}
 
-	wrappedContext->GetV8Context()->SetSecurityToken(
-		Context::GetCurrent()->GetSecurityToken());
+	return scope.Close(global);
+}
 
-	return scope.Close(context);
+Handle<Value> WrappedScript::DisposeContext(const Arguments& args)
+{
+	HandleScope scope;
+
+	if (args.Length() < 1) {
+		return JSException::Error("Must pass the context as the first argument.");
+	}
+
+	WrappedContext* wrappedContext = WrappedContext::Unwrap(args[0]->ToObject());
+	delete wrappedContext;
 }
 
 Handle<Value> WrappedScript::RunInContext(const Arguments& args)
@@ -217,9 +196,14 @@ Handle<Value> WrappedScript::EvalMachine(const Arguments& args)
 		sandbox = args[sandbox_index]->ToObject();
 	}
 
-	const int filename_index = sandbox_index + (context_flag == newContext ? 1 : 0);
+	int filename_offset = 1;
+	if (context_flag == thisContext) {
+		filename_offset = 0;
+	}
+
+	const int filename_index = sandbox_index + filename_offset;
 	Local<String> filename =
-			args.Length() > filename_index ? args[filename_index]->ToString() : String::New("evalmachine.<anonymous>");
+		args.Length() > filename_index ? args[filename_index]->ToString() : String::New("evalmachine.<anonymous>");
 
 	const int display_error_index = args.Length() - 1;
 	bool display_error = false;
@@ -242,7 +226,7 @@ Handle<Value> WrappedScript::EvalMachine(const Arguments& args)
 	} else if (context_flag == userContext) {
 		// Use the passed in context
 		contextArg = args[sandbox_index]->ToObject();
-		nContext = NativeObject::Unwrap<WrappedContext>(contextArg);
+		nContext = WrappedContext::Unwrap(contextArg);
 		context = nContext->GetV8Context();
 	}
 
@@ -250,29 +234,6 @@ Handle<Value> WrappedScript::EvalMachine(const Arguments& args)
 	if (context_flag == userContext || context_flag == newContext) {
 		// Enter the context
 		context->Enter();
-
-		// Call the initCallback, if it exists
-		if (nContext) {
-			Persistent<Function> initCallback = nContext->GetInitCallback();
-
-			if (!initCallback.IsEmpty()) {
-				Handle<Value> callbackArgs[] = { contextArg, context->Global() };
-				initCallback->Call(contextArg, 2, callbackArgs);
-			}
-		}
-
-		// Copy everything from the passed in sandbox (either the persistent
-		// context for runInContext(), or the sandbox arg to runInNewContext()).
-		keys = sandbox->GetPropertyNames();
-
-		for (i = 0; i < keys->Length(); i++) {
-			Handle<String> key = keys->Get(Integer::New(i))->ToString();
-			Handle<Value> value = sandbox->Get(key);
-			if (value == sandbox) {
-				value = context->Global();
-			}
-			context->Global()->Set(key, value);
-		}
 	}
 
 	Handle<Value> result;
@@ -317,19 +278,6 @@ Handle<Value> WrappedScript::EvalMachine(const Arguments& args)
 		result = args.This();
 	}
 
-	if (context_flag == userContext || context_flag == newContext) {
-		// success! copy changes back onto the sandbox object.
-		keys = context->Global()->GetPropertyNames();
-		for (i = 0; i < keys->Length(); i++) {
-			Handle<String> key = keys->Get(Integer::New(i))->ToString();
-			Handle<Value> value = context->Global()->Get(key);
-			if (value == context->Global()) {
-				value = sandbox;
-			}
-			sandbox->Set(key, value);
-		}
-	}
-
 	if (context_flag == newContext) {
 		// Clean up, clean up, everybody everywhere!
 		context->DetachGlobal();
@@ -342,7 +290,6 @@ Handle<Value> WrappedScript::EvalMachine(const Arguments& args)
 
 	if (result->IsObject()) {
 		Local<Context> creation = result->ToObject()->CreationContext();
-		LOGE(TAG, "creation is global context? %d", creation == V8Runtime::globalContext);
 	}
 
 	return result == args.This() ? result : scope.Close(result);
@@ -358,12 +305,7 @@ void ScriptsModule::Initialize(Handle<Object> target)
 void ScriptsModule::Dispose()
 {
 	WrappedScript::constructor_template.Dispose();
-	WrappedContext::constructor_template.Dispose();
-}
-
-Handle<Object> ScriptsModule::WrapContext(Persistent<Context> context)
-{
-	return WrappedContext::WrapContext(context);
+	WrappedContext::global_template.Dispose();
 }
 
 }

@@ -33,6 +33,16 @@ USE_PROXY_FOR_VERIFY_AUTORESIZING
 	return picker.frame.size.height;
 }
 
+-(CGFloat)verifyWidth:(CGFloat)suggestedWidth
+{
+    if (suggestedWidth <= 0 && picker != nil) {
+        return picker.frame.size.width;
+    }
+    else {
+        return suggestedWidth;
+    }
+}
+
 -(UIControl*)picker 
 {
 	if (picker==nil)
@@ -70,6 +80,7 @@ USE_PROXY_FOR_VERIFY_AUTORESIZING
 			[(UIPickerView*)picker reloadAllComponents];
 		}
 	}
+    [super frameSizeChanged:frame bounds:bounds];
 }
 
 -(void)didFirePropertyChanges
@@ -304,14 +315,18 @@ USE_PROXY_FOR_VERIFY_AUTORESIZING
 {
 	TiUIPickerColumnProxy *proxy = [[self columns] objectAtIndex:component];
 	TiUIPickerRowProxy *rowproxy = [proxy rowAt:row];
+	CGRect frame = CGRectMake(0.0, 0.0, [self pickerView:pickerView widthForComponent:component]-20, [self pickerView:pickerView rowHeightForComponent:component]);
 	NSString *title = [rowproxy valueForKey:@"title"];
 	if (title!=nil)
 	{
-		UILabel *pickerLabel = (UILabel *)view;
+		UILabel *pickerLabel = nil;
+		
+		if ([view isMemberOfClass:[UILabel class]]) {
+			pickerLabel = (UILabel*)view;
+		}
 		
 		if (pickerLabel == nil) 
 		{
-			CGRect frame = CGRectMake(0.0, 0.0, [self pickerView:pickerView widthForComponent:component]-20, [self pickerView:pickerView rowHeightForComponent:component]);
 			pickerLabel = [[[UILabel alloc] initWithFrame:frame] autorelease];
 			[pickerLabel setTextAlignment:UITextAlignmentLeft];
 			[pickerLabel setBackgroundColor:[UIColor clearColor]];
@@ -325,7 +340,13 @@ USE_PROXY_FOR_VERIFY_AUTORESIZING
 	}
 	else 
 	{
-		return [rowproxy view];
+		UIView* returnView = [rowproxy view];
+		UIView* wrapperView = [[[UIView alloc] initWithFrame:frame]autorelease];
+		[wrapperView setAutoresizingMask:UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight];
+		[wrapperView setBackgroundColor:[UIColor clearColor]];
+		returnView.frame = wrapperView.bounds;
+		[wrapperView addSubview:returnView];
+		return wrapperView;
 	}
 }
 
@@ -375,13 +396,25 @@ USE_PROXY_FOR_VERIFY_AUTORESIZING
 
 -(void)valueChanged:(id)sender
 {
-	if ([self.proxy _hasListeners:@"change"])
-	{
-		NSDate *date = [(UIDatePicker*)sender date];
-		NSDictionary *event = [NSDictionary dictionaryWithObjectsAndKeys:date,@"value",nil];
-		[self.proxy replaceValue:date forKey:@"value" notification:NO];
-		[self.proxy fireEvent:@"change" withObject:event];
-	}
+    if (sender == picker) {
+        
+        if ([self.proxy _hasListeners:@"change"])
+        {
+            if ( [self isDatePicker] && [(UIDatePicker*)picker datePickerMode] == UIDatePickerModeCountDownTimer ) {
+                double val = [(UIDatePicker*)picker countDownDuration]*1000;
+                NSNumber* newDuration = [NSNumber numberWithDouble:val];
+                NSDictionary *event = [NSDictionary dictionaryWithObjectsAndKeys:newDuration,@"countDownDuration",nil];
+                [self.proxy replaceValue:newDuration forKey:@"countDownDuration" notification:NO];
+                [self.proxy fireEvent:@"change" withObject:event];
+            }
+            else {
+                NSDate *date = [(UIDatePicker*)picker date];
+                NSDictionary *event = [NSDictionary dictionaryWithObjectsAndKeys:date,@"value",nil];
+                [self.proxy replaceValue:date forKey:@"value" notification:NO];
+                [self.proxy fireEvent:@"change" withObject:event];
+            }
+        }
+    }
 }
 
 

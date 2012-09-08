@@ -19,7 +19,7 @@
 #import "WebFont.h"
 #import "TiViewProxy.h"
 #import "TiComplexValue.h"
-
+#import "TiApp.h"
 
 NSArray * tableKeySequence;
 
@@ -28,13 +28,9 @@ NSArray * tableKeySequence;
 @end
 
 @implementation TiUITableViewProxy
-@synthesize sections;
+@synthesize internalSections=sections;
 
--(int)sectionCount
-{
-	return [sections count];
-}
-
+USE_VIEW_FOR_CONTENT_HEIGHT
 
 #pragma mark Internal
 
@@ -46,6 +42,13 @@ NSArray * tableKeySequence;
 		sections = [[NSMutableArray array] retain];
 	}
 	return self;
+}
+
+-(void)_initWithProperties:(NSDictionary *)properties
+{
+    [self replaceValue:NUMBOOL(NO) forKey:@"searchHidden" notification:NO];
+    [self replaceValue:NUMBOOL(YES) forKey:@"hideSearchOnSelection" notification:NO];
+    [super _initWithProperties:properties];
 }
 
 - (void) dealloc
@@ -188,6 +191,35 @@ NSArray * tableKeySequence;
 	return 0;
 }
 
+-(void)rememberSection:(TiUITableViewSectionProxy *)section
+{
+	[self rememberProxy:section];
+	[section setParent:self];
+	[section reorderRows];
+}
+
+-(void)forgetSection:(TiUITableViewSectionProxy *)section
+{
+	[self forgetProxy:section];
+	[section setTable:nil];
+	[section setParent:nil];
+}
+
+-(void)performTableActionIfInitialized:(void (^)(void))tableAction forceReload:(BOOL) forceReload;
+{
+	if (![self viewInitialized]) {
+		return;
+	}
+	TiViewProxy<TiKeyboardFocusableView> * chosenField = [[[TiApp controller] keyboardFocusedProxy] retain];
+	BOOL oldSuppress = [chosenField suppressFocusEvents];
+	[chosenField setSuppressFocusEvents:YES];
+	tableAction();
+	[chosenField focus:nil];
+	[chosenField setSuppressFocusEvents:oldSuppress];
+	[chosenField release];
+	[(TiUITableView *)[self view] refreshSearchControllerUsingReload:forceReload];
+}
+
 -(TiUITableViewRowProxy*)makeTableViewRowFromDict:(NSDictionary*)data
 {
     id<TiEvaluator> context = [self executionContext];
@@ -275,23 +307,14 @@ NSArray * tableKeySequence;
 
 #pragma mark Public APIs
 
--(void)setSearchHidden:(id)args
-{
-	// we implement here to force it regardless of the current state 
-	// since the user can manually change the search field by pulling 
-	// down the row
-	ENSURE_SINGLE_ARG(args,NSObject);
-	[self replaceValue:args forKey:@"searchHidden" notification:YES];
-}
-
 -(void)selectRow:(id)args
 {
-	[[self view] performSelectorOnMainThread:@selector(selectRow:) withObject:args waitUntilDone:NO];
+	TiThreadPerformOnMainThread(^{[(TiUITableView*)[self view] selectRow:args];}, NO);
 }
 
 -(void)deselectRow:(id)args
 {
-	[[self view] performSelectorOnMainThread:@selector(deselectRow:) withObject:args waitUntilDone:NO];
+	TiThreadPerformOnMainThread(^{[(TiUITableView*)[self view] deselectRow:args];}, NO);
 }
 
 -(void)scrollToIndex:(id)args
@@ -340,60 +363,71 @@ NSArray * tableKeySequence;
 
 -(void)updateRow:(id)args
 {
-	ENSURE_UI_THREAD(updateRow,args);
-	
-	int index = [TiUtils intValue:[args objectAtIndex:0]];
-    id data = [args objectAtIndex:1]; // Can be either dictionary or row object
-    NSDictionary *anim = [args count] > 2 ? [args objectAtIndex:2] : nil;
-	
+    int index = 0;
+    id data = nil;
+    NSDictionary* anim = nil;
+    
+    ENSURE_INT_AT_INDEX(index, args, 0);
+    ENSURE_ARG_AT_INDEX(data, args, 1, NSObject);
+    ENSURE_ARG_OR_NIL_AT_INDEX(anim, args, 2, NSDictionary);
+    
 	TiUITableViewRowProxy *newrow = [self tableRowFromArg:data];
-	TiUITableView *table = [self viewInitialized]?[self tableView]:nil;
-		
-	int current = 0;
-	int row = index;
-	int sectionIdx = 0;
-	
-	TiUITableViewRowProxy *rowProxy = nil;
-	TiUITableViewSectionProxy *sectionProxy = nil;
-	
-	for (sectionProxy in sections)
-	{
-		int rowCount = [sectionProxy rowCount];
-		if (rowCount + current > index)
-		{
-			rowProxy = [sectionProxy rowAtIndex:row];
-			break;
-		}
-		row -= rowCount;
-		current += rowCount;
-		sectionIdx++;
-	}		
-	
-	if (rowProxy==nil)
-	{
-		[self throwException:[NSString stringWithFormat:@"cannot find row at index: %d",index] subreason:nil location:CODELOCATION];
-		return;
-	}
-	
-	[rowProxy.section rememberProxy:newrow];	//If we wait until the main thread, it'll be too late!
-	newrow.section = rowProxy.section;
-	newrow.row = rowProxy.row;
-	newrow.parent = newrow.section;
-
-	//We now need to disconnect the old row proxy.
-	rowProxy.section = nil;
-	rowProxy.parent = nil;
-	rowProxy.table = nil;
-
-	
-    // Only update the row if we're loading it with data; but most of this should
-    // be taken care of by -[TiUITableViewProxy tableRowFromArg:] anyway, right?
-    if ([data isKindOfClass:[NSDictionary class]]) {
-        [newrow updateRow:data withObject:anim];
+    
+    __block TiUITableViewRowProxy *rowProxy = nil;
+    
+    TiThreadPerformOnMainThread(^{
+        int current = 0;
+        int row = index;
+        int sectionIdx = 0;
+        TiUITableViewSectionProxy *sectionProxy = nil;
+        
+        for (sectionProxy in sections)
+        {
+            int rowCount = [sectionProxy rowCount];
+            if (rowCount + current > index)
+            {
+                rowProxy = [sectionProxy rowAtIndex:row];
+                break;
+            }
+            row -= rowCount;
+            current += rowCount;
+            sectionIdx++;
+        }	
+    }, YES);
+    
+    if (rowProxy==nil)
+    {
+        [self throwException:[NSString stringWithFormat:@"cannot find row at index: %d",index] subreason:nil location:CODELOCATION];
+        return;
     }
-	
-	TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithObject:newrow animation:anim type:TiUITableViewActionUpdateRow] autorelease];
-	[table dispatchAction:action];
+    
+    if (rowProxy != newrow) {
+        [[rowProxy section] rememberProxy:newrow];
+        
+        newrow.section = rowProxy.section;
+        newrow.row = rowProxy.row;
+        newrow.parent = newrow.section;
+        
+        //We now need to disconnect the old row proxy.
+        rowProxy.section = nil;
+        rowProxy.parent = nil;
+        rowProxy.table = nil;
+        
+        
+        // Only update the row if we're loading it with data; but most of this should
+        // be taken care of by -[TiUITableViewProxy tableRowFromArg:] anyway, right?
+        if ([data isKindOfClass:[NSDictionary class]]) {
+            [newrow updateRow:data withObject:anim];
+        }
+    }
+    
+    TiThreadPerformOnMainThread(^{
+        TiUITableView *table = [self viewInitialized]?[self tableView]:nil;
+        TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithObject:newrow animation:anim type:TiUITableViewActionUpdateRow] autorelease];
+        [table dispatchAction:action];
+    }, NO);
+    
+
 }
 
 -(void)deleteRow:(id)args
@@ -406,7 +440,7 @@ NSArray * tableKeySequence;
 		
 	if ([sections count]==0)
 	{
-		NSLog(@"[WARN] no rows found in table, ignoring delete");
+		DebugLog(@"[WARN] No rows found in table, ignoring delete");
 		return;
 	}
 	
@@ -415,7 +449,7 @@ NSArray * tableKeySequence;
 	
 	if (section==nil || row == nil)
 	{
-		NSLog(@"[WARN] no row found for index: %d",index);
+		DebugLog(@"[WARN] No row found for index: %d",index);
 		return;
 	}
 	
@@ -512,7 +546,7 @@ NSArray * tableKeySequence;
 	{
 		//No table, we have to do the data update ourselves.
 		//TODO: Implement. Better yet, refactor.
-		NSLog(@"[WARN] Table view was not in place before insertRowBefore was called. (Tell Blain or Steve to fix it!)");
+		DebugLog(@"[WARN] Table view was not in place before insertRowBefore was called.");
 	}
 
 }
@@ -589,7 +623,7 @@ NSArray * tableKeySequence;
 	{
 		//No table, we have to do the data update ourselves.
 		//TODO: Implement. Better yet, refactor.
-		NSLog(@"[WARN] Table view was not in place before insertRowAfter was called. (Tell Blain or Steve to fix it!)");
+		DebugLog(@"[WARN] Table view was not in place before insertRowAfter was called.");
 	}
 
 }
@@ -621,11 +655,15 @@ NSArray * tableKeySequence;
     {
         id header = [row valueForKey:@"header"];
         TiUITableViewActionType actionType = TiUITableViewActionAppendRow;
-        TiUITableViewSectionProxy* section = [sections lastObject];
+        __block TiUITableViewSectionProxy* section = nil;
+        TiThreadPerformOnMainThread(^{
+            section = [sections lastObject];
+        }, YES);
+        
         if (header != nil) {
-            section = [self sectionWithHeader:header table:table];			
-            section.section = [sections count];
-            
+            NSInteger newSectionIndex = section.section + 1;
+            section = [self sectionWithHeader:header table:table];		
+            section.section = newSectionIndex;
             actionType = TiUITableViewActionAppendRowWithSection;
         }
         row.section = section;
@@ -721,7 +759,13 @@ NSArray * tableKeySequence;
 
 -(NSArray*)data
 {
-	return sections;
+    __block NSArray* curSections = nil;
+    //TIMOB-9890. Ensure data is retrieved off of the main 
+    //thread to ensure any pending operations are completed
+    TiThreadPerformOnMainThread(^{
+        curSections = [sections copy];
+    }, YES);
+    return [curSections autorelease];
 }
 
 -(void)setContentInsets:(id)args
@@ -742,7 +786,334 @@ NSArray * tableKeySequence;
 	[[self view] performSelector:@selector(setContentInsets_:withObject:) withObject:arg1 withObject:arg2];
 }
 
+DEFINE_DEF_PROP(scrollsToTop,[NSNumber numberWithBool:YES]);
 
+#pragma mark Section management
+
+-(NSArray *)sections
+{
+	__block NSArray * result = nil;
+	TiThreadPerformOnMainThread(^{
+		result = [sections copy];
+	},YES);
+	return [result autorelease];
+}
+
+-(void)setSections:(NSArray *)newSections withObject:(id)properties
+{
+	ENSURE_TYPE_OR_NIL(newSections,NSArray);
+	
+	//Step 1: Sanity check. This might be optional.
+	Class sectionClass = [TiUITableViewSectionProxy class];
+	int sectionIndex = 0;
+	for (TiUITableViewSectionProxy *section in newSections) {
+		if (![section isKindOfClass:sectionClass]) {
+			NSString * exceptionDetail = [NSString stringWithFormat:
+										  @"section %d expected: %@, was: %@",
+										  sectionIndex, sectionClass, [section class]];
+			[self throwException:TiExceptionInvalidType subreason:exceptionDetail location:CODELOCATION];
+		}
+		sectionIndex++;
+	}
+	
+	//Step 2: Prepare the sections for entry. Only things that will not affect
+	//	sections already in the table view.
+	for (TiUITableViewSectionProxy *section in newSections) {
+		[self rememberSection:section];
+	}
+	
+	//Step 3: Apply on main thread.
+	TiThreadPerformOnMainThread(^{
+		NSArray * oldSections = sections;
+		
+		int sectionIndex = 0;
+		for (TiUITableViewSectionProxy *section in newSections) {
+			[section setSection: sectionIndex];
+			sectionIndex++;
+		}
+		
+		sections = [newSections mutableCopy];
+		[self performTableActionIfInitialized:^{
+			UITableViewRowAnimation ourAnimation = [TiUITableViewAction animationStyleForProperties:properties];
+			TiUITableView * ourView = (TiUITableView *)[self view];
+			for (TiUITableViewSectionProxy *section in newSections) {
+				[section setTable:ourView];
+			}
+			[ourView reloadDataFromCount:[oldSections count] toCount:sectionIndex animation:ourAnimation];
+		} forceReload:YES];
+		
+		for (TiUITableViewSectionProxy * section in oldSections) {
+			if (![newSections containsObject:section]) {
+				[self forgetSection:section];
+			}
+		}
+		[oldSections release];
+	},NO);
+}
+
+-(void)setSections:(NSArray *)newSections
+{
+	[self setSections:newSections withObject:nil];
+}
+
+-(int)sectionCount
+{ //TODO: Shouldn't this be in the main thread, too?
+	return [sections count];
+}
+
+-(TiUITableViewSectionProxy *) tableSectionFromArg: (id)arg
+{
+	if([arg isKindOfClass:[TiUITableViewSectionProxy class]]){
+		return arg;
+	}
+	if (![arg isKindOfClass:[NSDictionary class]]) {
+		return nil;
+	}
+	id<TiEvaluator> context = [self executionContext];
+    if (context == nil) {
+        context = [self pageContext];
+    }
+	TiUITableViewSectionProxy *result = [[TiUITableViewSectionProxy alloc] _initWithPageContext:context];
+	[result _initWithProperties:arg];
+	return [result autorelease];
+}
+
+-(void)appendSection:(id)args
+{
+	//Step one: sanity
+	int argCount = [args count];
+	if(argCount < 1){
+		[self throwException:TiExceptionNotEnoughArguments
+				   subreason:@"expected 1 argument, received none" location:CODELOCATION];
+	}
+
+	//Step two: Prepare
+	id appendum = [args objectAtIndex:0];
+	TiUITableViewSectionProxy * section = nil;
+	NSMutableArray * sectionArray = nil;
+
+	if ([appendum isKindOfClass:[NSArray class]]) {
+		int arrayCount = [appendum count];
+		if (arrayCount < 1) {
+			[self throwException:TiExceptionNotEnoughArguments subreason:@"array must not be empty" location:CODELOCATION];
+		}
+		sectionArray = [NSMutableArray arrayWithCapacity:arrayCount];
+		for (id thisSectionObject in appendum) {
+			TiUITableViewSectionProxy * thisSection = [self tableSectionFromArg:thisSectionObject];
+			if (thisSection == nil) {
+				[self throwException:TiExceptionInvalidType subreason:[NSString stringWithFormat:@"array must contain Ti.UI.tableSections or objects to be such. Got %@ instead",thisSectionObject] location:CODELOCATION];
+			}
+			[sectionArray addObject:thisSection];
+			[self rememberSection:thisSection];
+		}
+	} else {
+		section = [self tableSectionFromArg:appendum];
+		if(section==nil){
+			[self throwException:TiExceptionInvalidType subreason:[NSString stringWithFormat:@"expected Ti.UI.tableSection or object. Got %@ instead",appendum] location:CODELOCATION];
+		}
+		[self rememberSection:section];
+	}
+
+	NSDictionary * options = nil;
+	if(argCount > 1){
+		options = [args objectAtIndex:1];
+	}
+
+	//Step three: Main thread
+	TiThreadPerformOnMainThread(^{
+		BOOL falseFirstSection = [sections count] == 0;
+		NSRange sectionRange = NSMakeRange([sections count], 1);
+		if (sectionArray != nil){
+			sectionRange.length = [sectionArray count];
+			int sectionIndex = sectionRange.location;
+			for (TiUITableViewSectionProxy * thisSection in sectionArray) {
+				[thisSection setSection:sectionIndex++];
+			}
+			[sections addObjectsFromArray:sectionArray];
+		} else {
+			//A nil array means a single section.
+			[section setSection:sectionRange.location];
+			[sections addObject:section];			
+		}
+		
+		[self performTableActionIfInitialized:^{
+			UITableViewRowAnimation ourAnimation = [TiUITableViewAction animationStyleForProperties:options];
+			TiUITableView * ourView = (TiUITableView *)[self view];
+			UITableView * ourTable = [ourView tableView];
+			[section setTable:ourView];
+			for (TiUITableViewSectionProxy * thisSection in sectionArray) {
+				[thisSection setTable:ourView];
+			}
+			if (!falseFirstSection) { 
+				[ourTable insertSections:[NSIndexSet indexSetWithIndexesInRange:sectionRange] withRowAnimation:ourAnimation];
+			} else { //UITableView doesn't know we had 0 sections.
+				[ourTable beginUpdates];
+				NSRange insertedSectionRange = NSMakeRange(1, sectionRange.length - 1);
+				[ourTable deleteSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:ourAnimation];
+				[ourTable insertSections:[NSIndexSet indexSetWithIndexesInRange:sectionRange] withRowAnimation:ourAnimation];
+				[ourTable endUpdates];
+			}
+		} forceReload:NO];
+	}, NO);
+}
+
+-(void)deleteSection:(id)args
+{
+	//Step one: sanity
+	int argCount = [args count];
+	if(argCount < 1){
+		[self throwException:TiExceptionNotEnoughArguments
+				   subreason:@"expected 1 argument, received none" location:CODELOCATION];
+	}
+	int sectionIndex;
+	ENSURE_INT_AT_INDEX(sectionIndex, args, 0);
+	if (sectionIndex < 0){
+		[self throwException:TiExceptionRangeError subreason:@"index must be non-negative" location:CODELOCATION];
+	}
+	
+	NSDictionary * options = nil;
+	if(argCount > 1){
+		options = [args objectAtIndex:1];
+	}
+
+	TiThreadPerformOnMainThread(^{
+		if (sectionIndex >= [sections count]) {
+			return;
+		}
+		[self forgetSection:[sections objectAtIndex:sectionIndex]];
+		[sections removeObjectAtIndex:sectionIndex];
+		[self performTableActionIfInitialized:^{
+			UITableViewRowAnimation ourAnimation = [TiUITableViewAction animationStyleForProperties:options];
+			TiUITableView * ourView = (TiUITableView *)[self view];
+			UITableView * ourTable = [ourView tableView];
+			if ([sections count]==0) { //UITableView can't handle 0 sections.
+				[ourTable reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:ourAnimation];
+			} else {
+				[ourTable deleteSections:[NSIndexSet indexSetWithIndex:sectionIndex] withRowAnimation:ourAnimation];
+			}
+		} forceReload:NO];
+	}, NO);	
+}
+
+-(void)insertSection:(TiUITableViewSectionProxy *)section atIndex:(int)sectionIndex withOptions:(id)options
+{
+	[self rememberSection:section];
+	TiThreadPerformOnMainThread(^{
+		int oldSectionCount = [sections count];
+		int boundSectionIndex = MIN(sectionIndex, oldSectionCount);
+		[section setSection:boundSectionIndex];
+		[sections insertObject:section atIndex:boundSectionIndex];
+
+		[self performTableActionIfInitialized:^{
+			UITableViewRowAnimation ourAnimation = [TiUITableViewAction animationStyleForProperties:options];
+			TiUITableView * ourView = (TiUITableView *)[self view];
+			UITableView * ourTable = [ourView tableView];
+			[section setTable:ourView];
+			if (oldSectionCount == 0) { //UITableView doesn't know we have 0 sections.
+				[ourTable reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:ourAnimation];
+			} else {
+				[ourTable insertSections:[NSIndexSet indexSetWithIndex:boundSectionIndex] withRowAnimation:ourAnimation];
+			}
+		} forceReload:NO];
+	}, NO);
+}
+
+
+-(void)insertSectionAfter:(id)args
+{
+	int argCount = [args count];
+	ENSURE_ARG_COUNT(args, 2)
+
+	NSDictionary * options = nil;
+	if(argCount > 2){
+		options = [args objectAtIndex:2];
+	}
+
+	int sectionIndex;
+	ENSURE_INT_AT_INDEX(sectionIndex, args, 0);
+	if (sectionIndex < 0){
+		[self throwException:TiExceptionRangeError subreason:@"index must be non-negative" location:CODELOCATION];
+	}
+
+	id sectionObject = [args objectAtIndex:1];
+	TiUITableViewSectionProxy * section = [self tableSectionFromArg:sectionObject];
+	
+	if (section == nil) {
+		[self throwException:TiExceptionInvalidType subreason:[NSString stringWithFormat:@"expected Ti.UI.tableSection or object. Got %@ instead",sectionObject] location:CODELOCATION];
+	}
+	
+	[self insertSection:section atIndex:sectionIndex+1 withOptions:options];
+}
+
+-(void)insertSectionBefore:(id)args
+{
+	int argCount = [args count];
+	ENSURE_ARG_COUNT(args, 2)
+	
+	NSDictionary * options = nil;
+	if(argCount > 2){
+		options = [args objectAtIndex:2];
+	}
+	
+	int sectionIndex;
+	ENSURE_INT_AT_INDEX(sectionIndex, args, 0);
+	if (sectionIndex < 0){
+		[self throwException:TiExceptionRangeError subreason:@"index must be non-negative" location:CODELOCATION];
+	}
+
+	id sectionObject = [args objectAtIndex:1];
+	TiUITableViewSectionProxy * section = [self tableSectionFromArg:sectionObject];
+	
+	if (section == nil) {
+		[self throwException:TiExceptionInvalidType subreason:[NSString stringWithFormat:@"expected Ti.UI.tableSection or object. Got %@ instead",sectionObject] location:CODELOCATION];
+	}
+	
+	[self insertSection:section atIndex:sectionIndex withOptions:options];
+}
+
+-(void)updateSection:(id)args
+{
+	int argCount = [args count];
+	ENSURE_ARG_COUNT(args, 2)
+	
+	NSDictionary * options = nil;
+	if(argCount > 2){
+		options = [args objectAtIndex:2];
+	}
+	
+	int sectionIndex;
+	ENSURE_INT_AT_INDEX(sectionIndex, args, 1);
+	
+	id sectionObject = [args objectAtIndex:0];
+	TiUITableViewSectionProxy * section = [self tableSectionFromArg:sectionObject];
+	
+	if (section == nil) {
+		[self throwException:TiExceptionInvalidType subreason:[NSString stringWithFormat:@"expected Ti.UI.tableSection or object. Got %@ instead",sectionObject] location:CODELOCATION];
+	}
+
+	[self rememberSection:section];
+
+	TiThreadPerformOnMainThread(^{
+		if ((sectionIndex < 0) || (sectionIndex >= [sections count])) {
+			return;
+		}
+		
+		[section setSection:sectionIndex];
+		TiUITableViewSectionProxy * oldSection = [sections objectAtIndex:sectionIndex];
+		if (oldSection != section) {
+			[self forgetSection:oldSection];
+			[sections replaceObjectAtIndex:sectionIndex withObject:section];
+		}
+		
+		[self performTableActionIfInitialized:^{
+			UITableViewRowAnimation ourAnimation = [TiUITableViewAction animationStyleForProperties:options];
+			TiUITableView * ourView = (TiUITableView *)[self view];
+			UITableView * ourTable = [ourView tableView];
+			[section setTable:ourView];
+			[ourTable reloadSections:[NSIndexSet indexSetWithIndex:sectionIndex] withRowAnimation:ourAnimation];
+		} forceReload:NO];
+	}, NO);
+}
 @end 
 
 #endif

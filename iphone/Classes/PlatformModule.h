@@ -15,7 +15,6 @@
 	NSString *model;
 	NSString *version;
 	NSString *architecture;
-	NSString *macaddress;
 	NSNumber *processorCount;
 	NSString *username;
 	NSString *address;
@@ -30,6 +29,7 @@
 @property(readonly,nonatomic) NSString *model;
 @property(readonly,nonatomic) NSString *version;
 @property(readonly,nonatomic) NSString *architecture;
+@property(readonly,nonatomic) NSString *manufacturer;
 @property(readonly,nonatomic) NSString *macaddress;
 @property(readonly,nonatomic) NSNumber *processorCount;
 @property(readonly,nonatomic) NSString *username;

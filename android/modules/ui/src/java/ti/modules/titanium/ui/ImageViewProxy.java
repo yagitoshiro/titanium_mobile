@@ -22,6 +22,7 @@ import android.graphics.Bitmap;
 
 @Kroll.proxy(creatableInModule=UIModule.class, propertyAccessors = {
 	"decodeRetries",
+	TiC.PROPERTY_AUTOROTATE,
 	TiC.PROPERTY_DEFAULT_IMAGE,
 	TiC.PROPERTY_DURATION,
 	TiC.PROPERTY_ENABLE_ZOOM_CONTROLS,
@@ -60,7 +61,6 @@ public class ImageViewProxy extends ViewProxy
 		return bitmap;
 	}
 
-	@SuppressWarnings("unchecked")
 	public ArrayList<TiDrawableReference> getImageSources()
 	{
 		return imageSources;
@@ -117,6 +117,12 @@ public class ImageViewProxy extends ViewProxy
 	@Kroll.getProperty @Kroll.method
 	public boolean getAnimating() {
 		return getImageView().isAnimating();
+	}
+	
+	@Kroll.getProperty @Kroll.method
+	public boolean getPaused() 
+	{
+		return getImageView().isPaused();
 	}
 	
 	@Kroll.getProperty @Kroll.method

@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2011-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -8,9 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <v8.h>
-#ifdef V8_DEBUGGER
-# include <v8-debug.h>
-#endif
+#include <v8-debug.h>
 
 #include "AndroidUtil.h"
 #include "EventEmitter.h"
@@ -29,6 +27,9 @@
 
 #define TAG "V8Runtime"
 
+// The port number on which the V8 debugger will listen on.
+#define V8_DEBUGGER_PORT 9999
+
 namespace titanium {
 
 Persistent<Context> V8Runtime::globalContext;
@@ -37,6 +38,7 @@ Persistent<Array> V8Runtime::moduleContexts;
 
 jobject V8Runtime::javaInstance;
 bool V8Runtime::debuggerEnabled = false;
+bool V8Runtime::DBG = false;
 
 /* static */
 void V8Runtime::collectWeakRef(Persistent<Value> ref, void *parameter)
@@ -77,17 +79,19 @@ void V8Runtime::bootstrap(Local<Object> global)
 	krollGlobalObject = Persistent<Object>::New(Object::New());
 	moduleContexts = Persistent<Array>::New(Array::New());
 
+	KrollBindings::initFunctions(krollGlobalObject);
+
 	DEFINE_METHOD(krollGlobalObject, "log", krollLog);
-	DEFINE_METHOD(krollGlobalObject, "binding", KrollBindings::getBinding);
 	DEFINE_TEMPLATE(krollGlobalObject, "EventEmitter", EventEmitter::constructorTemplate);
 
 	krollGlobalObject->Set(String::NewSymbol("runtime"), String::New("v8"));
+	krollGlobalObject->Set(String::NewSymbol("DBG"), v8::Boolean::New(V8Runtime::DBG));
 	krollGlobalObject->Set(String::NewSymbol("moduleContexts"), moduleContexts);
 
 	LOG_TIMER(TAG, "Executing kroll.js");
 
 	TryCatch tryCatch;
-	Handle<Value> result = V8Util::executeString(KrollBindings::getMainSource(), String::New("kroll.js"));
+	Handle<Value> result = V8Util::executeString(KrollBindings::getMainSource(), String::New("ti:/kroll.js"));
 
 	if (tryCatch.HasCaught()) {
 		V8Util::reportException(tryCatch, true);
@@ -119,7 +123,6 @@ static void logV8Exception(Handle<Message> msg, Handle<Value> data)
 		*String::Utf8Value(msg->GetSourceLine()));
 }
 
-#ifdef V8_DEBUGGER
 static jmethodID dispatchDebugMessage = NULL;
 
 static void dispatchHandler()
@@ -131,7 +134,6 @@ static void dispatchHandler()
 
 	env->CallVoidMethod(V8Runtime::javaInstance, dispatchDebugMessage);
 }
-#endif
 
 } // namespace titanium
 
@@ -146,7 +148,7 @@ using namespace titanium;
  * Method:    nativeInit
  * Signature: (Lorg/appcelerator/kroll/runtime/v8/V8Runtime;)J
  */
-JNIEXPORT void JNICALL Java_org_appcelerator_kroll_runtime_v8_V8Runtime_nativeInit(JNIEnv *env, jobject self, jboolean useGlobalRefs, jboolean debuggerEnabled)
+JNIEXPORT void JNICALL Java_org_appcelerator_kroll_runtime_v8_V8Runtime_nativeInit(JNIEnv *env, jobject self, jboolean useGlobalRefs, jint debuggerPort, jboolean DBG)
 {
 	HandleScope scope;
 	titanium::JNIScope jniScope(env);
@@ -156,7 +158,8 @@ JNIEXPORT void JNICALL Java_org_appcelerator_kroll_runtime_v8_V8Runtime_nativeIn
 	V8::SetCaptureStackTraceForUncaughtExceptions(true);
 
 	JavaObject::useGlobalRefs = useGlobalRefs;
-	V8Runtime::debuggerEnabled = debuggerEnabled;
+	V8Runtime::debuggerEnabled = debuggerPort >= 0;
+	V8Runtime::DBG = DBG;
 
 	V8Runtime::javaInstance = env->NewGlobalRef(self);
 	JNIUtil::initCache();
@@ -164,17 +167,16 @@ JNIEXPORT void JNICALL Java_org_appcelerator_kroll_runtime_v8_V8Runtime_nativeIn
 	Persistent<Context> context = Persistent<Context>::New(Context::New());
 	context->Enter();
 
-
-#ifdef V8_DEBUGGER
-	jclass v8RuntimeClass = env->FindClass("org/appcelerator/kroll/runtime/v8/V8Runtime");
-	dispatchDebugMessage = env->GetMethodID(v8RuntimeClass, "dispatchDebugMessages", "()V");
-
-	Debug::SetDebugMessageDispatchHandler(dispatchHandler);
-	Debug::EnableAgent("titanium", 9999, true);
-#endif
-
 	V8Runtime::globalContext = context;
 	V8Runtime::bootstrap(context->Global());
+
+	if (V8Runtime::debuggerEnabled) {
+		jclass v8RuntimeClass = env->FindClass("org/appcelerator/kroll/runtime/v8/V8Runtime");
+		dispatchDebugMessage = env->GetMethodID(v8RuntimeClass, "dispatchDebugMessages", "()V");
+
+		Debug::SetDebugMessageDispatchHandler(dispatchHandler);
+		Debug::EnableAgent("titanium", debuggerPort, true);
+	}
 
 	LOG_HEAP_STATS(TAG);
 }
@@ -216,11 +218,67 @@ JNIEXPORT void JNICALL Java_org_appcelerator_kroll_runtime_v8_V8Runtime_nativeRu
 	}
 }
 
+JNIEXPORT jobject JNICALL Java_org_appcelerator_kroll_runtime_v8_V8Runtime_nativeEvalString
+	(JNIEnv *env, jobject self, jstring source, jstring filename)
+{
+	ENTER_V8(V8Runtime::globalContext);
+	titanium::JNIScope jniScope(env);
+
+	Handle<Value> jsSource = TypeConverter::javaStringToJsString(source);
+	if (jsSource.IsEmpty() || !jsSource->IsString()) {
+		LOGE(TAG, "Error converting Javascript string, aborting evalString");
+		return NULL;
+	}
+
+	Handle<Value> jsFilename = TypeConverter::javaStringToJsString(filename);
+
+	TryCatch tryCatch;
+	Handle<Script> script = Script::Compile(jsSource->ToString(), jsFilename);
+	Local<Value> result = script->Run();
+
+	if (tryCatch.HasCaught()) {
+		V8Util::openJSErrorDialog(tryCatch);
+		V8Util::reportException(tryCatch, true);
+		return NULL;
+	}
+
+	return TypeConverter::jsValueToJavaObject(result);
+}
+
 JNIEXPORT void JNICALL Java_org_appcelerator_kroll_runtime_v8_V8Runtime_nativeProcessDebugMessages(JNIEnv *env, jobject self)
 {
-#ifdef V8_DEBUGGER
 	v8::Debug::ProcessDebugMessages();
-#endif
+}
+
+JNIEXPORT jboolean JNICALL Java_org_appcelerator_kroll_runtime_v8_V8Runtime_nativeIdle(JNIEnv *env, jobject self)
+{
+	return v8::V8::IdleNotification();
+}
+
+/*
+ * Called by V8Runtime.java, this passes a KrollSourceCodeProvider java class instance
+ * to KrollBindings, where it's stored and later used to retrieve an external CommonJS module's
+ * Javascript code when require(moduleName) occurs in Javascript.
+ * "External" CommonJS modules are CommonJS modules stored in external modules.
+ */
+JNIEXPORT void JNICALL Java_org_appcelerator_kroll_runtime_v8_V8Runtime_nativeAddExternalCommonJsModule
+	(JNIEnv *env, jobject self, jstring moduleName, jobject sourceProvider)
+{
+	const char* mName = env->GetStringUTFChars(moduleName, NULL);
+	jclass cls = env->GetObjectClass(sourceProvider);
+
+	if (!cls) {
+		LOGE(TAG, "Could not find source code provider class for module: %s", mName);
+		return;
+	}
+
+	jmethodID method = env->GetMethodID(cls, "getSourceCode", "(Ljava/lang/String;)Ljava/lang/String;");
+	if (!method) {
+		LOGE(TAG, "Could not find getSourceCode method in source code provider class for module: %s", mName);
+		return;
+	}
+
+	KrollBindings::addExternalCommonJsModule(mName, env->NewGlobalRef(sourceProvider), method);
 }
 
 // This method disposes of all native resources used by V8 when
@@ -256,7 +314,8 @@ JNIEXPORT void JNICALL Java_org_appcelerator_kroll_runtime_v8_V8Runtime_nativeDi
 			// WrappedContext is simply a C++ wrapper for the V8 Context object,
 			// and is used to expose the Context to javascript. See ScriptsModule for
 			// implementation details
-			WrappedContext *wrappedContext = NativeObject::Unwrap<WrappedContext>(moduleContext->ToObject());
+			WrappedContext *wrappedContext = WrappedContext::Unwrap(moduleContext->ToObject());
+			ASSERT(wrappedContext != NULL);
 
 			// Detach each context's global object, and dispose the context
 			wrappedContext->GetV8Context()->DetachGlobal();
@@ -294,6 +353,12 @@ JNIEXPORT void JNICALL Java_org_appcelerator_kroll_runtime_v8_V8Runtime_nativeDi
 	env->DeleteGlobalRef(V8Runtime::javaInstance);
 
 	V8Runtime::javaInstance = NULL;
+
+	// Whereas most calls to IdleNotification get kicked off via Java (the looper's
+	// idle event in V8Runtime.java), we can't count on that running anymore at this point.
+	// So as our last act, run IdleNotification until it returns true so we can clean up all
+	// the stuff we just released references for above.
+	while (!v8::V8::IdleNotification());
 }
 
 jint JNI_OnLoad(JavaVM *vm, void *reserved)

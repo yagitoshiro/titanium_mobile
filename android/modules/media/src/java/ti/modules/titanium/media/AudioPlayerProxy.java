@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -10,7 +10,6 @@ import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.kroll.annotations.Kroll;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.titanium.TiBaseActivity;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.TiContext;
@@ -20,12 +19,13 @@ import org.appcelerator.titanium.util.TiConvert;
 import ti.modules.titanium.filesystem.FileProxy;
 import android.app.Activity;
 
-@Kroll.proxy(creatableInModule=MediaModule.class)
+@Kroll.proxy(creatableInModule=MediaModule.class, propertyAccessors={
+	TiC.PROPERTY_VOLUME
+})
 public class AudioPlayerProxy extends KrollProxy
 	implements OnLifecycleEvent
 {
-	private static final String LCAT = "AudioPlayerProxy";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "AudioPlayerProxy";
 
 	@Kroll.constant public static final int STATE_BUFFERING = TiSound.STATE_BUFFERING;
 	@Kroll.constant public static final int STATE_INITIALIZED = TiSound.STATE_INITIALIZED;
@@ -46,7 +46,8 @@ public class AudioPlayerProxy extends KrollProxy
 		// TODO - we shouldnt need this as this proxy is created only from the runtime - double check
 		// TODO this needs to happen post-set
 		//((TiBaseActivity)getActivity()).addOnLifecycleEventListener(this);
-		//setProperty("volume", 0.5, true);
+
+		defaultValues.put(TiC.PROPERTY_VOLUME, 1.0f);
 	}
 
 	public AudioPlayerProxy(TiContext tiContext)
@@ -58,7 +59,6 @@ public class AudioPlayerProxy extends KrollProxy
 	protected void initActivity(Activity activity) {
 		super.initActivity(activity);
 		((TiBaseActivity)getActivity()).addOnLifecycleEventListener(this);
-		setPropertyAndFire("volume", 0.5);
 	}
 
 	@Override
@@ -76,13 +76,12 @@ public class AudioPlayerProxy extends KrollProxy
 		if (options.containsKey(TiC.PROPERTY_ALLOW_BACKGROUND)) {
 			setProperty(TiC.PROPERTY_ALLOW_BACKGROUND, options.get(TiC.PROPERTY_ALLOW_BACKGROUND));
 		}
-		if (DBG) {
-			Log.i(LCAT, "Creating audio player proxy for url: " + TiConvert.toString(getProperty("url")));
-		}
+		Log.i(TAG, "Creating audio player proxy for url: " + TiConvert.toString(getProperty(TiC.PROPERTY_URL)),
+			Log.DEBUG_MODE);
 	}
 	
 	
-	@Kroll.getProperty
+	@Kroll.getProperty @Kroll.method
 	public String getUrl() {
 		return TiConvert.toString(getProperty(TiC.PROPERTY_URL));
 	}

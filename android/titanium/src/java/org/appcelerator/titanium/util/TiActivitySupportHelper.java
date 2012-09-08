@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -10,17 +10,18 @@ import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 
+/**
+ * An implementation of {@link TiActivitySupport} interface.
+ */
 public class TiActivitySupportHelper
 	implements TiActivitySupport
 {
-	private static final String LCAT = "TiActivitySupportHelper";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TiActivitySupportHelper";
 	
 	protected Activity activity;
 	protected HashMap<Integer, TiActivityResultHandler> resultHandlers;
@@ -37,6 +38,9 @@ public class TiActivitySupportHelper
 		return uniqueResultCodeAllocator.getAndIncrement();
 	}
 
+	/**
+	 * Refer to {@link TiActivitySupport#launchActivityForResult(Intent, int, TiActivityResultHandler)} for more details.
+	 */
 	public void launchActivityForResult(Intent intent, final int code, final TiActivityResultHandler resultHandler)
 	{
 		TiActivityResultHandler wrapper = new TiActivityResultHandler() {
@@ -61,6 +65,12 @@ public class TiActivitySupportHelper
 		}
 	}
 
+	/**
+	 * Invokes {@link TiActivityResultHandler#onResult(Activity, int, int, Intent)}. This is done when the launched activity exits.
+	 * @param requestCode the passed in activity's code from {@link TiActivityResultHandler#onResult(Activity, int, int, Intent)}.
+	 * @param resultCode  the passed in activity's result code from {@link TiActivityResultHandler#onResult(Activity, int, int, Intent)}.
+	 * @param data  the intent.
+	 */
 	public void onActivityResult(int requestCode, int resultCode, Intent data) {
 		TiActivityResultHandler handler = resultHandlers.get(requestCode);
 		if (handler != null) {
@@ -68,13 +78,22 @@ public class TiActivitySupportHelper
 		}
 	}
 
+	/**
+	 * Removes a registered handler.
+	 * @param code the handler's lookup key.
+	 */
 	public void removeResultHandler(int code) {
 		resultHandlers.remove(code);
 	}
 
+	/**
+	 * Registers the resultHandler into a HashMap<Integer, TiActivityResultHandler>
+	 * @param code resultHandler's id.
+	 * @param resultHandler the resultHandler.
+	 */
 	public void registerResultHandler(int code, TiActivityResultHandler resultHandler) {
 		if (resultHandler == null) {
-			Log.w(LCAT, "Received a null result handler");
+			Log.w(TAG, "Received a null result handler");
 		}
 		resultHandlers.put(code, resultHandler);
 	}

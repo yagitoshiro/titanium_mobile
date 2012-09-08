@@ -50,9 +50,9 @@
 	NSInteger buffersUsed;
 	NSDictionary *httpHeaders;
 	
-	TI_AudioStreamerState state;
-	TI_AudioStreamerStopReason stopReason;
-	TI_AudioStreamerErrorCode errorCode;
+	AudioStreamerState state;
+	AudioStreamerStopReason stopReason;
+	AudioStreamerErrorCode errorCode;
 	OSStatus err;
 	
 	bool discontinuous;			// flag to indicate middle of the stream
@@ -74,6 +74,7 @@
 	UInt64 processedPacketsCount;		// number of packets accumulated for bitrate estimation
 	UInt64 processedPacketsSizeTotal;	// byte size of accumulated estimation packets
 
+	double volume;
 	double seekTime;
 	BOOL seekWasRequested;
 	double requestedSeekTime;
@@ -84,8 +85,8 @@
 	double lastProgress;		// last calculated progress point
 }
 
-@property TI_AudioStreamerErrorCode errorCode;
-@property (nonatomic, readonly) TI_AudioStreamerState state;
+@property AudioStreamerErrorCode errorCode;
+@property (nonatomic, readonly) AudioStreamerState state;
 @property (readonly) double progress;
 @property (readonly) double duration;
 @property (readwrite) UInt32 bitRate;

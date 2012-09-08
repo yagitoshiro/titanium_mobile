@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -17,7 +17,6 @@ import java.lang.reflect.Method;
 import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.titanium.TiBlob;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.io.TiBaseFile;
@@ -25,6 +24,7 @@ import org.appcelerator.titanium.io.TiFileFactory;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.TiConvert;
 import org.appcelerator.titanium.util.TiMimeTypeHelper;
+import org.appcelerator.titanium.util.TiUIHelper;
 import org.appcelerator.titanium.view.TiBackgroundDrawable;
 import org.appcelerator.titanium.view.TiCompositeLayout;
 import org.appcelerator.titanium.view.TiUIView;
@@ -32,8 +32,10 @@ import org.appcelerator.titanium.view.TiUIView;
 import ti.modules.titanium.ui.WebViewProxy;
 import android.content.Context;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Build;
+import android.view.MotionEvent;
 import android.view.View;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -41,8 +43,7 @@ import android.webkit.WebView;
 public class TiUIWebView extends TiUIView
 {
 
-	private static final String LCAT = "TiUIWebView";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TiUIWebView";
 	private TiWebViewClient client;
 	private boolean changingUrl = false;
 
@@ -76,6 +77,41 @@ public class TiUIWebView extends TiUIView
 			}
 			super.destroy();
 		}
+
+		@Override
+		public boolean onTouchEvent(MotionEvent ev)
+		{
+			
+			boolean handled = false;
+
+			// In Android WebView, all the click events are directly sent to WebKit. As a result, OnClickListener() is
+			// never called. Therefore, we have to manually call performClick() when a click event is detected.
+			//
+			// In native Android and in the Ti world, it's possible to to have a touchEvent click on a link in a webview and
+			// also to be detected as a click on the webview.  So we cannot let handling of the event one way block
+			// the handling the other way -- it must be passed to both in all cases for everything to work correctly.
+			//
+			if (ev.getAction() == MotionEvent.ACTION_UP) {
+				Rect r = new Rect(0, 0, getWidth(), getHeight());
+				if (r.contains((int) ev.getX(), (int) ev.getY())) {
+					handled = proxy.fireEvent(TiC.EVENT_CLICK, dictFromEvent(ev));
+				}
+			}
+			
+			// Don't return here -- must call super.onTouchEvent()
+			
+			boolean superHandled = super.onTouchEvent(ev);
+			
+			return (superHandled || handled);
+		}
+
+		@SuppressWarnings("deprecation")
+		@Override
+		protected void onLayout(boolean changed, int left, int top, int right, int bottom)
+		{
+			super.onLayout(changed, left, top, right, bottom);
+			TiUIHelper.firePostLayoutEvent(proxy);
+		}
 	}
 
 	public TiUIWebView(TiViewProxy proxy)
@@ -92,6 +128,7 @@ public class TiUIWebView extends TiUIView
 		settings.setJavaScriptCanOpenWindowsAutomatically(true);
 		settings.setLoadsImagesAutomatically(true);
 		settings.setLightTouchEnabled(true);
+		settings.setDomStorageEnabled(true); // Required by some sites such as Twitter. This is in our iOS WebView too.
 
 		// enable zoom controls by default
 		boolean enableZoom = true;
@@ -113,13 +150,15 @@ public class TiUIWebView extends TiUIView
 		webView.setWebViewClient(client);
 		webView.client = client;
 
-		WebViewProxy webProxy = (WebViewProxy) proxy;
-		String username = webProxy.getBasicAuthenticationUserName();
-		String password = webProxy.getBasicAuthenticationPassword();
-		if (username != null && password != null) {
-			setBasicAuthentication(username, password);
+		if (proxy instanceof WebViewProxy) {
+			WebViewProxy webProxy = (WebViewProxy) proxy;
+			String username = webProxy.getBasicAuthenticationUserName();
+			String password = webProxy.getBasicAuthenticationPassword();
+			if (username != null && password != null) {
+				setBasicAuthentication(username, password);
+			}
+			webProxy.clearBasicAuthentication();
 		}
-		webProxy.clearBasicAuthentication();
 
 		TiCompositeLayout.LayoutParams params = getLayoutParams();
 		params.autoFillsHeight = true;
@@ -156,13 +195,13 @@ public class TiUIWebView extends TiUIView
 				}
 			}
 		} catch (ClassNotFoundException e) {
-			Log.e(LCAT, "ClassNotFound: " + e.getMessage(), e);
+			Log.e(TAG, "ClassNotFound: " + e.getMessage(), e);
 		} catch (NoSuchMethodException e) {
-			Log.e(LCAT, "NoSuchMethod: " + e.getMessage(), e);
+			Log.e(TAG, "NoSuchMethod: " + e.getMessage(), e);
 		} catch (NoSuchFieldException e) {
-			Log.e(LCAT, "NoSuchField: " + e.getMessage(), e);
+			Log.e(TAG, "NoSuchField: " + e.getMessage(), e);
 		} catch (IllegalAccessException e) {
-			Log.e(LCAT, "IllegalAccess: " + e.getMessage(), e);
+			Log.e(TAG, "IllegalAccess: " + e.getMessage(), e);
 		}
 	}
 
@@ -281,28 +320,26 @@ public class TiUIWebView extends TiUIView
 						out.append("\n");
 						line = breader.readLine();
 					}
-					setHtml(out.toString(), (originalUrlHasScheme ? url : finalUrl)); // keep app:// etc. intact in case
-																						// html in file contains links
-																						// to JS that use app:// etc.
+					setHtmlInternal(out.toString(), (originalUrlHasScheme ? url : finalUrl), "text/html"); // keep app:// etc. intact in case
+																								   	       // html in file contains links
+																						 				   // to JS that use app:// etc.
 					return;
 				} catch (IOException ioe) {
-					Log.e(LCAT, "Problem reading from " + url + ": " + ioe.getMessage()
+					Log.e(TAG, "Problem reading from " + url + ": " + ioe.getMessage()
 						+ ". Will let WebView try loading it directly.", ioe);
 				} finally {
 					if (fis != null) {
 						try {
 							fis.close();
 						} catch (IOException e) {
-							Log.w(LCAT, "Problem closing stream: " + e.getMessage(), e);
+							Log.w(TAG, "Problem closing stream: " + e.getMessage(), e);
 						}
 					}
 				}
 			}
 		}
 
-		if (DBG) {
-			Log.d(LCAT, "WebView will load " + url + " directly without code injection.");
-		}
+		Log.d(TAG, "WebView will load " + url + " directly without code injection.", Log.DEBUG_MODE);
 		// iOS parity: for whatever reason, when a remote url is used, the iOS implementation
 		// explicitly sets the native webview's setScalesPageToFit to YES if the
 		// Ti scalesPageToFit property has _not_ been set.
@@ -310,7 +347,6 @@ public class TiUIWebView extends TiUIView
 			getWebView().getSettings().setLoadWithOverviewMode(true);
 		}
 		getWebView().loadUrl(finalUrl);
-
 	}
 
 	public void changeProxyUrl(String url)
@@ -339,49 +375,55 @@ public class TiUIWebView extends TiUIView
 		}
 		return content;
 	}
-
+	
 	public void setHtml(String html)
 	{
-		// getWebView().loadData(escapeContent(html), "text/html", "utf-8");
-		// Commented out the loadData solution. You can't access local assets without
-		// providing an acceptable base url to loadDataWithBaseURL. Using the contentEscaping
-		// breaks the document and munges the quotes causing images to fail. Images in local
-		// html should be absolute or relative to app:// if you want to use app url's, they
-		// need to be translated before setting html or setting a document change trigger.
-		// I've enclosed the code used in the old 0.X codebase for reference
-		//
-		// Use this code to post process your document to adjust URLs. May need updating it comes
-		// from ti.js in the old 0.X method.
-		//
-		// var imgs = document.getElementsByTagName('img');
-		// for(i=0; i < imgs.length;i++) {
-		// var s = imgs[i].src;
-		// //alert('BEFORE: ' + s);
-		// if (s.indexOf('file:///') === 0) {
-		// if (s.indexOf('file:///sdcard/') == -1 && s.indexOf('file:///android_asset') == -1) {
-		// imgs[i].src = s.substring(8);
-		// }
-		// } else if (s.indexOf('app://') === 0) {
-		// imgs[i].src = s.substring(6);
-		// }
-		//
-		// //alert('AFTER: ' + imgs[i].src);
-		// }
-
-		setHtml(html, TiC.URL_ANDROID_ASSET_RESOURCES);
+		setHtmlInternal(html, TiC.URL_ANDROID_ASSET_RESOURCES, "text/html");
 	}
 
-	private void setHtml(String html, String baseUrl)
+	public void setHtml(String html, KrollDict d)
+	{
+		if (d == null) {
+			setHtml(html);
+			return;
+		}
+		
+		String baseUrl = TiC.URL_ANDROID_ASSET_RESOURCES;
+		String mimeType = "text/html";
+		if (d.containsKey(TiC.PROPERTY_BASE_URL_WEBVIEW)) {
+			baseUrl = TiConvert.toString(d.get(TiC.PROPERTY_BASE_URL_WEBVIEW));
+		} 
+		if (d.containsKey(TiC.PROPERTY_MIMETYPE)) {
+			mimeType = TiConvert.toString(d.get(TiC.PROPERTY_MIMETYPE));
+		}
+		
+		setHtmlInternal(html, baseUrl, mimeType);
+	}
+
+	/**
+	 * Loads HTML content into the web view.  Note that the "historyUrl" property 
+	 * must be set to non null in order for the web view history to work correctly 
+	 * when working with local files (IE:  goBack() and goForward() will not work if 
+	 * null is used)
+	 * 
+	 * @param html					HTML data to load into the web view
+	 * @param baseUrl				url to associate with the data being loaded
+	 * @param mimeType				mime type of the data being loaded
+	 */
+	private void setHtmlInternal(String html, String baseUrl, String mimeType)
 	{
 		// iOS parity: for whatever reason, when html is set directly, the iOS implementation
 		// explicitly sets the native webview's setScalesPageToFit to NO if the
 		// Ti scalesPageToFit property has _not_ been set.
+
+		WebView webView = getWebView();
 		if (!proxy.hasProperty(TiC.PROPERTY_SCALES_PAGE_TO_FIT)) {
-			getWebView().getSettings().setLoadWithOverviewMode(false);
+			webView.getSettings().setLoadWithOverviewMode(false);
 		}
+
 		if (html.contains(TiWebViewBinding.SCRIPT_INJECTION_ID)) {
 			// Our injection code is in there already, go ahead and show.
-			getWebView().loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null);
+			webView.loadDataWithBaseURL(baseUrl, html, mimeType, "utf-8", baseUrl);
 			return;
 		}
 
@@ -389,16 +431,18 @@ public class TiUIWebView extends TiUIView
 		int tagEnd = -1;
 		if (tagStart >= 0) {
 			tagEnd = html.indexOf(">", tagStart + 1);
+
 			if (tagEnd > tagStart) {
 				StringBuilder sb = new StringBuilder(html.length() + 2500);
 				sb.append(html.substring(0, tagEnd + 1));
 				sb.append(TiWebViewBinding.INJECTION_CODE);
 				sb.append(html.substring(tagEnd + 1));
-				getWebView().loadDataWithBaseURL(baseUrl, sb.toString(), "text/html", "utf-8", null);
+				webView.loadDataWithBaseURL(baseUrl, sb.toString(), mimeType, "utf-8", baseUrl);
 				return;
 			}
 		}
-		getWebView().loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null);
+
+		webView.loadDataWithBaseURL(baseUrl, html, mimeType, "utf-8", baseUrl);
 	}
 
 	public void setData(TiBlob blob)
@@ -430,6 +474,11 @@ public class TiUIWebView extends TiUIView
 		client.setBasicAuthentication(username, password);
 	}
 
+	public void destroyWebViewBinding()
+	{
+		client.getBinding().destroy();
+	}
+
 	public void setPluginState(int pluginState)
 	{
 		if (Build.VERSION.SDK_INT > Build.VERSION_CODES.ECLAIR_MR1) {
@@ -448,12 +497,12 @@ public class TiUIWebView extends TiUIView
 							internalSetPluginState.invoke(webSettings, enumPluginStateOnDemand);
 							break;
 						default:
-							Log.w(LCAT, "Not a valid plugin state. Ignoring setPluginState request");
+							Log.w(TAG, "Not a valid plugin state. Ignoring setPluginState request");
 					}
 				} catch (InvocationTargetException e) {
-					Log.e(LCAT, "Method not supported", e);
+					Log.e(TAG, "Method not supported", e);
 				} catch (IllegalAccessException e) {
-					Log.e(LCAT, "Illegal Access", e);
+					Log.e(TAG, "Illegal Access", e);
 				}
 			}
 		}
@@ -467,9 +516,9 @@ public class TiUIWebView extends TiUIView
 				try {
 					internalWebViewPause.invoke(v);
 				} catch (InvocationTargetException e) {
-					Log.e(LCAT, "Method not supported", e);
+					Log.e(TAG, "Method not supported", e);
 				} catch (IllegalAccessException e) {
-					Log.e(LCAT, "Illegal Access", e);
+					Log.e(TAG, "Illegal Access", e);
 				}
 			}
 		}
@@ -483,9 +532,9 @@ public class TiUIWebView extends TiUIView
 				try {
 					internalWebViewResume.invoke(v);
 				} catch (InvocationTargetException e) {
-					Log.e(LCAT, "Method not supported", e);
+					Log.e(TAG, "Method not supported", e);
 				} catch (IllegalAccessException e) {
-					Log.e(LCAT, "Illegal Access", e);
+					Log.e(TAG, "Illegal Access", e);
 				}
 			}
 		}

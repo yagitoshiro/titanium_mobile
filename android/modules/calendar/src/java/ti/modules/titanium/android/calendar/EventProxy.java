@@ -1,3 +1,9 @@
+/**
+ * Appcelerator Titanium Mobile
+ * Copyright (c) 2011-2012 by Appcelerator, Inc. All Rights Reserved.
+ * Licensed under the terms of the Apache Public License
+ * Please see the LICENSE included with this distribution for details.
+ */
 package ti.modules.titanium.android.calendar;
 
 import java.util.ArrayList;
@@ -16,6 +22,9 @@ import android.content.ContentUris;
 import android.content.ContentValues;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
+import android.provider.CalendarContract.Events;
+import android.provider.CalendarContract.Instances;
 
 // Columns and value constants taken from android.provider.Calendar in the android source base
 @Kroll.proxy(parentModule=CalendarModule.class)
@@ -75,13 +84,27 @@ public class EventProxy extends KrollProxy {
 		ContentResolver contentResolver = TiApplication.getInstance().getContentResolver();
 		
 		Uri.Builder builder = Uri.parse(getInstancesWhenUri()).buildUpon();
+		
 		ContentUris.appendId(builder, date1);
 		ContentUris.appendId(builder, date2);
 		
+		String visibility = "";
+		if (Build.VERSION.SDK_INT >= 14) {
+			visibility = Instances.ACCESS_LEVEL;
+		} else {
+			visibility = "visibility";
+		}
+
 		Cursor eventCursor = contentResolver.query(builder.build(),
-			new String[] { "event_id", "title", "description", "eventLocation", "begin", "end", "allDay", "hasAlarm", "eventStatus", "visibility"},
+			new String[] { "event_id", "title", "description", "eventLocation", "begin", "end", "allDay", "hasAlarm", "eventStatus", visibility},
 			query, queryArgs, "startDay ASC, startMinute ASC");
-		
+
+		if(eventCursor == null) {
+			Log.w(TAG, "Unable to get any results when pulling events by date range");
+
+			return events;
+		}
+
 		while (eventCursor.moveToNext()) {
 			EventProxy event = new EventProxy();
 			event.id = eventCursor.getString(0);
@@ -112,8 +135,16 @@ public class EventProxy extends KrollProxy {
 	{
 		ArrayList<EventProxy> events = new ArrayList<EventProxy>();
 		ContentResolver contentResolver = TiApplication.getInstance().getContentResolver();
+		
+		String visibility = "";
+		if (Build.VERSION.SDK_INT >= 14) {
+			visibility = Instances.ACCESS_LEVEL;
+		} else {
+			visibility = "visibility";
+		}
+		
 		Cursor eventCursor = contentResolver.query(uri,
-			new String[] { "_id", "title", "description", "eventLocation", "dtstart", "dtend", "allDay", "hasAlarm", "eventStatus", "visibility", "hasExtendedProperties"},
+			new String[] { "_id", "title", "description", "eventLocation", "dtstart", "dtend", "allDay", "hasAlarm", "eventStatus", visibility, "hasExtendedProperties"},
 			query, queryArgs, orderBy);
 		
 		while (eventCursor.moveToNext()) {
@@ -150,13 +181,19 @@ public class EventProxy extends KrollProxy {
 		eventValues.put("hasExtendedProperties", 1);
 		
 		if (!data.containsKey("title")) {
-			Log.e(TAG, "No title found for event, so it wasn't created");
+			Log.e(TAG, "Title was not created, no title found for event");
 			return null;
 		}
 		
 		event.title = TiConvert.toString(data, "title");
 		eventValues.put("title", event.title);
 		eventValues.put("calendar_id", calendar.getId());
+		
+		//ICS requires eventTimeZone field when inserting new event
+		if (Build.VERSION.SDK_INT >= 14) {
+			eventValues.put(Events.EVENT_TIMEZONE, new Date().toString());
+		}
+
 		
 		if (data.containsKey("description")) {
 			event.description = TiConvert.toString(data, "description");
@@ -190,7 +227,7 @@ public class EventProxy extends KrollProxy {
 		}
 		
 		Uri eventUri = contentResolver.insert(Uri.parse(CalendarProxy.getBaseCalendarUri()+"/events"), eventValues);
-		Log.d("TiEvents", "created event with uri: " + eventUri);
+		Log.d("TiEvents", "created event with uri: " + eventUri, Log.DEBUG_MODE);
 		
 		String eventId = eventUri.getLastPathSegment();
 		event.id = eventId;
@@ -204,7 +241,14 @@ public class EventProxy extends KrollProxy {
 	}
 
 	public static ArrayList<EventProxy> queryEventsBetweenDates(long date1, long date2, CalendarProxy calendar) {
-		return queryEventsBetweenDates(date1, date2, "Calendars._id="+calendar.getId(), null);
+		if (Build.VERSION.SDK_INT >= 11)
+		{
+			return queryEventsBetweenDates(date1, date2, null, null);
+		}
+		else
+		{
+			return queryEventsBetweenDates(date1, date2, "Calendars._id="+calendar.getId(), null);
+		}
 	}
 
 	public static ArrayList<EventProxy> queryEventsBetweenDates(TiContext context, long date1, long date2, CalendarProxy calendar)
@@ -360,7 +404,7 @@ public class EventProxy extends KrollProxy {
 		if (!hasExtendedProperties) {
 			hasExtendedProperties = true;
 		}
-		Log.d("TiEvent", "set extended property: " + name + " = " + value);
+		Log.d("TiEvent", "set extended property: " + name + " = " + value, Log.DEBUG_MODE);
 		
 		// we need to update the DB
 		ContentResolver contentResolver = TiApplication.getInstance().getContentResolver();

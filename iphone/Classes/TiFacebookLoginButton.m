@@ -24,6 +24,7 @@
 		[button sizeToFit];
 		[self recenterButton];
 	}
+    [super frameSizeChanged:frame bounds:bounds];
 }
 
 -(FacebookModule*)module
@@ -59,17 +60,6 @@
 -(int)getStyleAndChangeSize:(id)style
 {
 	int buttonStyle = [TiUtils intValue:style];
-	if ([style isEqualToString:@"wide"]) 
-	{
-		buttonStyle = FB_LOGIN_BUTTON_WIDE;
-		NSLog(@"[WARN] Styling Options 'wide' will be DEPRECATED in 1.8.0 in favour of Ti.Facebook.BUTTON_STYLE_WIDE: REMOVED in 1.9) ");
-		
-	}
-	if([style isEqualToString:@"normal"]) {
-		buttonStyle = FB_LOGIN_BUTTON_NORMAL;
-		NSLog(@"[WARN] Styling Options 'normal' will be DEPRECATED in 1.8.0 in favour of Ti.Facebook.BUTTON_STYLE_NORMAL: REMOVED in 1.9) ");
-	}
-	
 	
 	CGRect frame = [self frameForButtonStyle:buttonStyle];
 	
@@ -94,7 +84,7 @@
 	// Create the default button, and set the default size
 	[[self module] addListener:self];
 	
-	button = [[FBLoginButton2 alloc] initWithFrame:[self frameForButtonStyle:buttonStyle]];
+	button = [[FBLoginButton alloc] initWithFrame:[self frameForButtonStyle:buttonStyle]];
 	button.isLoggedIn = [[self module] isLoggedIn];
 	button.style = buttonStyle;
 	[button updateImage];

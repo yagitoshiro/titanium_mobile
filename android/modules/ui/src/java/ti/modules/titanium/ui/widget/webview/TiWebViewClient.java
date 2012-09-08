@@ -1,15 +1,14 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
-
 package ti.modules.titanium.ui.widget.webview;
 
 import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
+import org.appcelerator.titanium.TiC;
 
 import ti.modules.titanium.media.TiVideoActivity;
 import android.content.Intent;
@@ -23,36 +22,45 @@ import android.webkit.WebViewClient;
 
 public class TiWebViewClient extends WebViewClient
 {
-	private static final String LCAT = "TiWVC";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TiWVC";
+
 	private TiUIWebView webView;
 	private TiWebViewBinding binding;
-
-
 	private String username, password;
 
-	public TiWebViewClient(TiUIWebView tiWebView, WebView webView) {
+	public TiWebViewClient(TiUIWebView tiWebView, WebView webView)
+	{
 		super();
 		this.webView = tiWebView;
 		binding = new TiWebViewBinding(webView);
 	}
 
 	@Override
-	public void onPageFinished(WebView view, String url) {
+	public void onPageFinished(WebView view, String url)
+	{
 		super.onPageFinished(view, url);
+
 		webView.changeProxyUrl(url);
 		KrollDict data = new KrollDict();
 		data.put("url", url);
 		webView.getProxy().fireEvent("load", data);
+		WebView nativeWebView = webView.getWebView();
+
+		if (nativeWebView != null) {
+			webView.getWebView().loadUrl("javascript:" + TiWebViewBinding.POLLING_CODE);
+		}
 	}
 
-	public TiWebViewBinding getBinding() {
+	public TiWebViewBinding getBinding()
+	{
 		return binding;
 	}
 
 	@Override
-	public void onPageStarted(WebView view, String url, Bitmap favicon) {
+	public void onPageStarted(WebView view, String url, Bitmap favicon)
+	{
 		super.onPageStarted(view, url, favicon);
+
 		KrollDict data = new KrollDict();
 		data.put("url", url);
 		webView.getProxy().fireEvent("beforeload", data);
@@ -63,33 +71,35 @@ public class TiWebViewClient extends WebViewClient
 	{
 		super.onReceivedError(view, errorCode, description, failingUrl);
 
-		//TODO report this to the user
-		String text = "Javascript Error("+errorCode+"): " + description;
-		Log.e(LCAT, "Received on error" + text);
+		KrollDict data = new KrollDict();
+		data.put("url", failingUrl);
+		data.put("errorCode", errorCode);
+		data.put("message", description);
+		webView.getProxy().fireEvent("error", data);
+
 	}
 
 	@Override
-	public boolean shouldOverrideUrlLoading(final WebView view, String url) {
-		if (DBG) {
-			Log.d(LCAT, "url=" + url);
-		}
+	public boolean shouldOverrideUrlLoading(final WebView view, String url)
+	{
+		Log.d(TAG, "url=" + url, Log.DEBUG_MODE);
 
 		if (URLUtil.isAssetUrl(url) || URLUtil.isContentUrl(url) || URLUtil.isFileUrl(url)) {
 			// go through the proxy to ensure we're on the UI thread
-			webView.getProxy().setProperty("url", url, true);
+			webView.getProxy().setPropertyAndFire(TiC.PROPERTY_URL, url);
 			return true;
 		} else if(url.startsWith(WebView.SCHEME_TEL)) {
-			Log.i(LCAT, "Launching dialer for " + url);
+			Log.i(TAG, "Launching dialer for " + url, Log.DEBUG_MODE);
 			Intent dialer = Intent.createChooser(new Intent(Intent.ACTION_DIAL, Uri.parse(url)), "Choose Dialer");
 			webView.getProxy().getActivity().startActivity(dialer);
-	        return true;
+			return true;
 		} else if (url.startsWith(WebView.SCHEME_MAILTO)) {
-			Log.i(LCAT, "Launching mailer for " + url);
+			Log.i(TAG, "Launching mailer for " + url, Log.DEBUG_MODE);
 			Intent mailer = Intent.createChooser(new Intent(Intent.ACTION_SENDTO, Uri.parse(url)), "Send Message");
 			webView.getProxy().getActivity().startActivity(mailer);
-	        return true;
+			return true;
 		} else if (url.startsWith(WebView.SCHEME_GEO)) {
-			Log.i(LCAT, "Launching app for " + url);
+			Log.i(TAG, "Launching app for " + url, Log.DEBUG_MODE);
 			/*geo:latitude,longitude
 			geo:latitude,longitude?z=zoom
 			geo:0,0?q=my+street+address
@@ -104,15 +114,12 @@ public class TiWebViewClient extends WebViewClient
 			if (mimeType != null) {
 				return shouldHandleMimeType(mimeType, url);
 			}
-			
-			if (DBG) {
-				Log.e(LCAT, "NEED to Handle " + url);
-			}
 			return super.shouldOverrideUrlLoading(view, url);
 		}
 	}
-	
-	private boolean shouldHandleMimeType(String mimeType, String url) {
+
+	private boolean shouldHandleMimeType(String mimeType, String url)
+	{
 		if (mimeType.startsWith("video/")) {
 			Intent intent = new Intent();
 			intent.setClass(webView.getProxy().getActivity(), TiVideoActivity.class);
@@ -124,17 +131,19 @@ public class TiWebViewClient extends WebViewClient
 		}
 		return false;
 	}
-	
+
 	@Override
 	public void onReceivedHttpAuthRequest(WebView view,
-			HttpAuthHandler handler, String host, String realm) {
+			HttpAuthHandler handler, String host, String realm)
+	{
 		
 		if (this.username != null && this.password != null) {
 			handler.proceed(this.username, this.password);
 		}
 	}
-	
-	public void setBasicAuthentication(String username, String password) {
+
+	public void setBasicAuthentication(String username, String password)
+	{
 		this.username = username;
 		this.password = password;
 	}

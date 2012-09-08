@@ -1,18 +1,19 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2011-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
 package org.appcelerator.kroll.runtime.rhino.modules;
 
+import org.appcelerator.kroll.KrollEvaluator;
+import org.appcelerator.kroll.KrollRuntime;
 import org.appcelerator.kroll.runtime.rhino.KrollScriptRunner;
 import org.appcelerator.kroll.runtime.rhino.KrollWith;
 import org.appcelerator.kroll.runtime.rhino.RhinoRuntime;
 import org.appcelerator.kroll.util.KrollAssetHelper;
 import org.mozilla.javascript.BaseFunction;
 import org.mozilla.javascript.Context;
-import org.mozilla.javascript.Function;
 import org.mozilla.javascript.Scriptable;
 import org.mozilla.javascript.ScriptableObject;
 import org.mozilla.javascript.Undefined;
@@ -39,6 +40,7 @@ public class ScriptsModule extends ScriptableObject
 		putProperty(this, "runInThisContext", new RunInThisContext());
 		putProperty(this, "runInSandbox", new RunInSandbox());
 		putProperty(this, "createContext", new CreateContext());
+		putProperty(this, "disposeContext", new BaseFunction());
 	}
 
 	private static Object runCompiledJar(Context context, Scriptable scope, Scriptable sandbox, String jarPath, String className)
@@ -60,7 +62,18 @@ public class ScriptsModule extends ScriptableObject
 
 	private static Object runSource(Context context, Scriptable scope, String source, String path, boolean displayError)
 	{
+		KrollEvaluator evaluator = KrollRuntime.getInstance().getEvaluator();
+		// Rhino raises an assertion exception if source happens to be null,
+		// which can occur if an included file is empty, for example.
+		if (source == null) {
+			source = "";
+		}
+
 		try {
+			if (evaluator != null) {
+				return evaluator.evaluateString(scope, source, path);
+			}
+
 			return context.evaluateString(scope, source, path, 1, null);
 
 		} catch (Throwable throwable) {
@@ -158,20 +171,12 @@ public class ScriptsModule extends ScriptableObject
 		public Object call(Context cx, Scriptable scope, Scriptable thisObj, Object[] args)
 		{
 			if (args.length < 1) {
-				throw new IllegalArgumentException("createContext requires 1 arg: contextGlobal[, initCallback]");
+				throw new IllegalArgumentException("createContext requires 1 arg: contextGlobal");
 			}
 
 			Scriptable contextGlobal = (Scriptable) args[0];
 			contextGlobal.setParentScope(null);
 			cx.initStandardObjects((ScriptableObject) contextGlobal);
-
-			if (args.length > 1) {
-				Object initCallbackArg = args[1];
-				if (initCallbackArg instanceof Function) {
-					Function initCallback = (Function) initCallbackArg;
-					initCallback.call(cx, scope, thisObj, new Object[] { null, contextGlobal });
-				}
-			}
 
 			return contextGlobal;
 		}

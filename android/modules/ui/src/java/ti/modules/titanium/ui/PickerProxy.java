@@ -1,15 +1,15 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
-
 package ti.modules.titanium.ui;
 
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.appcelerator.kroll.KrollDict;
@@ -40,12 +40,14 @@ import android.util.Log;
 import android.widget.DatePicker;
 import android.widget.TimePicker;
 
-@Kroll.proxy(creatableInModule=UIModule.class, propertyAccessors={"locale", "visibleItems"})
+@Kroll.proxy(creatableInModule=UIModule.class, propertyAccessors={
+	"locale", "visibleItems", "value"
+})
 public class PickerProxy extends TiViewProxy implements PickerColumnListener
 {
 	private int type = UIModule.PICKER_TYPE_PLAIN;
 	private ArrayList<Integer> preselectedRows = new ArrayList<Integer>();
-	private static final String LCAT = "PickerProxy";
+	private static final String TAG = "PickerProxy";
 	public static final int DEFAULT_VISIBLE_ITEMS_COUNT = 5;
 	private static final int MSG_FIRST_ID = TiViewProxy.MSG_LAST_ID + 1;
 	private static final int MSG_SELECT_ROW = MSG_FIRST_ID + 101;
@@ -85,10 +87,10 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 	public TiUIView createView(Activity activity) 
 	{
 		if (type == UIModule.PICKER_TYPE_COUNT_DOWN_TIMER ) {
-			Log.w(LCAT, "Countdown timer not supported in Titanium for Android");
+			Log.w(TAG, "Countdown timer not supported in Titanium for Android");
 			return null;
 		} else if (type == UIModule.PICKER_TYPE_DATE_AND_TIME) {
-			Log.w(LCAT, "Date+Time timer not supported in Titanium for Android");
+			Log.w(TAG, "Date+Time timer not supported in Titanium for Android");
 			return null;
 		} else if (type == UIModule.PICKER_TYPE_PLAIN ) {
 			return createPlainPicker(activity, useSpinner);
@@ -105,7 +107,7 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 				return createTimePicker(activity);
 			}
 		} else {
-			Log.w(LCAT, "Unknown picker type");
+			Log.w(TAG, "Unknown picker type");
 			return null;
 		}
 	}
@@ -145,7 +147,7 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 	public void setUseSpinner(boolean value)
 	{
 		if (peekView() != null) {
-			Log.w(LCAT, "Attempt to change useSpinner property after view has already been created. Ignoring.");
+			Log.w(TAG, "Attempt to change useSpinner property after view has already been created. Ignoring.");
 		} else {
 			useSpinner = value;
 			if (children != null && children.size() > 0) {
@@ -168,7 +170,7 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 	public void setType(int type)
 	{
 		if (peekView() != null) {
-			Log.e(LCAT, "Attempt to change picker type after view has been created.");
+			Log.e(TAG, "Attempt to change picker type after view has been created.");
 			throw new IllegalStateException("You cannot change the picker type after it has been rendered.");
 		}
 		this.type = type;
@@ -213,7 +215,7 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 	public void add(Object child) 
 	{
 		if (!isPlainPicker()) {
-			Log.w(LCAT, "Attempt to add to date/time or countdown picker ignored.");
+			Log.w(TAG, "Attempt to add to date/time or countdown picker ignored.");
 			return;
 		}
 		if (TiApplication.isUIThread() || peekView() == null) {
@@ -238,7 +240,7 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 		} else if (child.getClass().isArray()) {
 			getFirstColumn(true).addRows((Object[])child);
 		} else {
-			Log.w(LCAT, "Unexpected type not added to picker: " + child.getClass().getName());
+			Log.w(TAG, "Unexpected type not added to picker: " + child.getClass().getName());
 		}
 	}
 
@@ -296,7 +298,7 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 	public void setSelectedRow(int column, int row, @Kroll.argument(optional=true) boolean animated)
 	{
 		if (!isPlainPicker()) {
-			Log.w(LCAT, "Selecting row in date/time or countdown picker is not supported.");
+			Log.w(TAG, "Selecting row in date/time or countdown picker is not supported.");
 			return;
 		}
 		TiUIView view = peekView();
@@ -333,7 +335,7 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 	public PickerRowProxy getSelectedRow(int columnIndex)
 	{
 		if (!isPlainPicker()) {
-			Log.w(LCAT, "Cannot get selected row in date/time or countdown picker.");
+			Log.w(TAG, "Cannot get selected row in date/time or countdown picker.");
 			return null;
 		}
 		if (!(peekView() instanceof TiUIPicker)) {
@@ -353,7 +355,7 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 	public PickerColumnProxy[] getColumns()
 	{
 		if (!isPlainPicker()) {
-			Log.w(LCAT, "Cannot get columns from date/time or countdown picker.");
+			Log.w(TAG, "Cannot get columns from date/time or countdown picker.");
 			return null;
 		}
 		if (children == null) {
@@ -367,7 +369,7 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 	public void setColumns(Object passedColumns)
 	{
 		if (!isPlainPicker()) {
-			Log.w(LCAT, "Cannot set columns in date/time or countdown picker.");
+			Log.w(TAG, "Cannot set columns in date/time or countdown picker.");
 			return;
 		}
 		if (TiApplication.isUIThread() || peekView() == null) {
@@ -398,7 +400,7 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 				columns = new Object[]{passedColumns};
 			}
 			if (!(columns[0] instanceof PickerColumnProxy)) {
-				Log.w(LCAT, "Unexpected object type ignored for setColumns");
+				Log.w(TAG, "Unexpected object type ignored for setColumns");
 			} else { 
 				for (Object o : columns) {
 					if (o instanceof PickerColumnProxy) {
@@ -491,10 +493,10 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 	@Kroll.method
 	public void showDatePickerDialog(Object[] args)
 	{
-		KrollDict settings = new KrollDict();
+		HashMap settings = new HashMap();
 		final AtomicInteger callbackCount = new AtomicInteger(0); // just a flag to be sure dismiss doesn't fire callback if ondateset did already.
 		if (args.length > 0) {
-			settings = (KrollDict) args[0];
+			settings = (HashMap) args[0];
 		}
 		Calendar calendar = Calendar.getInstance();
 		if (settings.containsKey("value")) {
@@ -549,8 +551,14 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 				}
 			};
 		}
+
+		/*
+		 * use getAppCurrentActivity over getActivity since technically the picker
+		 * should show up on top of the current activity when called - not just the
+		 * activity it was created in
+		 */
 		DatePickerDialog dialog = new DatePickerDialog(
-					getActivity(),
+					TiApplication.getAppCurrentActivity(),
 					dateSetListener,
 					calendar.get(Calendar.YEAR),
 					calendar.get(Calendar.MONTH),
@@ -575,11 +583,11 @@ public class PickerProxy extends TiViewProxy implements PickerColumnListener
 	@Kroll.method
 	public void showTimePickerDialog(Object[] args)
 	{
-		KrollDict settings = new KrollDict();
+		HashMap settings = new HashMap();
 		boolean is24HourView = false;
 		final AtomicInteger callbackCount = new AtomicInteger(0); // just a flag to be sure dismiss doesn't fire callback if ondateset did already.
 		if (args.length > 0) {
-			settings = (KrollDict) args[0];
+			settings = (HashMap) args[0];
 		}
 		if (settings.containsKey("format24")) {
 			is24HourView = TiConvert.toBoolean(settings, "format24");

@@ -1,18 +1,18 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
 package ti.modules.titanium.ui;
 
+import java.lang.ref.WeakReference;
 import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.titanium.TiActivity;
 import org.appcelerator.titanium.TiActivityWindow;
 import org.appcelerator.titanium.TiActivityWindows;
@@ -43,14 +43,11 @@ import android.view.View.OnFocusChangeListener;
 import android.view.ViewGroup.LayoutParams;
 import android.view.Window;
 
-
 public class TiUIActivityWindow extends TiUIView
-	implements Handler.Callback, TiActivityWindow
+	implements TiActivityWindow
 {
-	private static final String LCAT = "TiUIActivityWindow";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TiUIActivityWindow";
 	private static final int MSG_ACTIVITY_CREATED = 1000;
-	private static final int MSG_ANIMATE = 100;
 	private static final String WINDOW_ID_PREFIX = "window$";
 
 	private static AtomicInteger idGenerator;
@@ -65,7 +62,6 @@ public class TiUIActivityWindow extends TiUIView
 	protected int messageId;
 	protected int lastWidth, lastHeight;
 
-
 	public TiUIActivityWindow(ActivityWindowProxy proxy, KrollDict options, Messenger messenger, int messageId)
 	{
 		super(proxy);
@@ -77,7 +73,7 @@ public class TiUIActivityWindow extends TiUIView
 
 		this.messenger = messenger;
 		this.messageId = messageId;
-		this.handler = new Handler(Looper.getMainLooper(), this);
+		this.handler = new Handler(Looper.getMainLooper(), new MessageHandler(this));
 		this.lastWidth = LayoutParams.FILL_PARENT;
 		this.lastHeight = LayoutParams.FILL_PARENT;
 
@@ -101,7 +97,7 @@ public class TiUIActivityWindow extends TiUIView
 
 		this.messenger = messenger;
 		this.messageId = messageId;
-		this.handler = new Handler(Looper.getMainLooper(), this);
+		this.handler = new Handler(Looper.getMainLooper(), new MessageHandler(this));
 		this.lastWidth = LayoutParams.FILL_PARENT;
 		this.lastHeight = LayoutParams.FILL_PARENT;
 
@@ -133,16 +129,20 @@ public class TiUIActivityWindow extends TiUIView
 
 	public void windowCreated(TiBaseActivity activity)
 	{
+		// This is the callback when any "heavy weight" (i.e. activity) window
+		// (except for windows associated with a tab) is created.
+
 		windowActivity = activity;
 		proxy.setActivity(activity);
 		bindProxies();
+		proxy.fireSyncEvent("windowCreated", null);
 	}
 
 	protected ActivityProxy bindWindowActivity(Activity activity)
 	{
 		ActivityProxy activityProxy = null;
 
-		Log.d(LCAT, "we shouldnt be getting in here to bindWindowActivity!!!");
+		Log.d(TAG, "we shouldnt be getting in here to bindWindowActivity!!!");
 		// TODO old logic before we started creating the activity proxy on the onCreate of TiBaseActivity
 		/*
 		if (activity instanceof TiBaseActivity) {
@@ -186,7 +186,7 @@ public class TiUIActivityWindow extends TiUIView
 
 		layout.setOnFocusChangeListener(new OnFocusChangeListener() {
 			public void onFocusChange(View view, boolean hasFocus) {
-				proxy.fireEvent(hasFocus ? TiC.EVENT_FOCUS : TiC.EVENT_BLUR, new KrollDict());
+				proxy.fireEvent(hasFocus ? TiC.EVENT_FOCUS : TiC.EVENT_BLUR, new KrollDict(), false);
 			}
 		});
 
@@ -198,7 +198,7 @@ public class TiUIActivityWindow extends TiUIView
 				messenger.send(msg);
 
 			} catch (RemoteException e) {
-				Log.e(LCAT, "Unable to send message: " + e.getMessage(), e);
+				Log.e(TAG, "Unable to send message: " + e.getMessage(), e);
 
 			} finally {
 				messenger = null;
@@ -207,7 +207,6 @@ public class TiUIActivityWindow extends TiUIView
 
 		if (windowActivity != null && windowActivity instanceof TiBaseActivity) {
 			layout.requestFocus();
-			((TiBaseActivity) windowActivity).fireInitialFocus(); 
 		}
 	}
 
@@ -233,36 +232,50 @@ public class TiUIActivityWindow extends TiUIView
 				windowActivity.finish();
 			}
 
+			// Finishing an activity is not synchronous, so we remove the activity from the activity stack here
+			TiApplication.removeFromActivityStack(windowActivity);
 			windowActivity = null;
 		}
 	}
 
-	@Override
-	public boolean handleMessage(Message msg)
+	// There is a bug in Android that prevents Messengers from getting
+	// released when they are passed to another Activity via an Intent.
+	// To avoid leaking large amounts of memory we implement the
+	// Handler callback in a nested, static class
+	// This allows the TiUIActivityWindow to get released once the window has closed.
+	private static class MessageHandler implements Handler.Callback
 	{
-		switch (msg.what) {
-			case MSG_ACTIVITY_CREATED :
-				if (DBG) {
-					Log.d(LCAT, "Received Activity creation message");
-				}
+		private WeakReference<TiUIActivityWindow> activityWindow;
 
-				if (windowActivity == null) {
-					windowActivity = (Activity) msg.obj;
-				}
-
-				proxy.setModelListener(this);
-				handleBooted();
-
-				return true;
-
-			case MSG_ANIMATE : {
-				animate();
-
-				return true;
-			}
+		public MessageHandler(TiUIActivityWindow activityWindow)
+		{
+			this.activityWindow = new WeakReference<TiUIActivityWindow>(activityWindow);
 		}
 
-		return false;
+		@Override
+		public boolean handleMessage(Message msg)
+		{
+			TiUIActivityWindow activityWindow = this.activityWindow.get();
+			if (activityWindow == null) {
+				return false;
+			}
+
+			switch (msg.what) {
+				case MSG_ACTIVITY_CREATED:
+					Log.d(TAG, "Received Activity creation message", Log.DEBUG_MODE);
+
+					if (activityWindow.windowActivity == null) {
+						activityWindow.windowActivity = (Activity) msg.obj;
+					}
+
+					activityWindow.proxy.setModelListener(activityWindow);
+					activityWindow.handleBooted();
+
+					return true;
+			}
+
+			return false;
+		}
 	}
 
 	@Override
@@ -286,7 +299,16 @@ public class TiUIActivityWindow extends TiUIView
 		if (post) {
 			proxy.getMainHandler().post(new Runnable() {
 				public void run() {
-					windowActivity.getWindow().setBackgroundDrawable(drawable);
+					/*
+					 *This is a check to prevent a race condition- when user execute open, open, close on the window.
+					 *setActivityBackground is being called in KrollRuntime thread, which may cause a race condition: windowActivity
+					 *is set to null in the middle of closing process, while the 2nd call of open gets here. In the case of
+					 *"open, open, close, open", this would work b/c the assigning of windowActivity and setting it to null are both being done 
+					 *on the same thread.
+					 */
+					if (windowActivity != null) {
+						windowActivity.getWindow().setBackgroundDrawable(drawable);
+					}
 				}
 			});
 
@@ -332,7 +354,7 @@ public class TiUIActivityWindow extends TiUIView
 			handleBackground(cd, opacityValue, post);
 
 		} else {
-			Log.w(LCAT, "Unable to set opacity w/o a backgroundColor");
+			Log.w(TAG, "Unable to set opacity w/o a backgroundColor");
 		}
 	}
 
@@ -406,6 +428,15 @@ public class TiUIActivityWindow extends TiUIView
 
 		if (d.containsKey(TiC.PROPERTY_WINDOW_PIXEL_FORMAT)) {
 			handleWindowPixelFormat(TiConvert.toInt(d, TiC.PROPERTY_WINDOW_PIXEL_FORMAT));
+		}
+
+		if (d.containsKey(TiC.PROPERTY_ACTIVITY)) {
+			Object activityObject = d.get(TiC.PROPERTY_ACTIVITY);
+			ActivityProxy activityProxy = getProxy().getActivityProxy();
+			if (activityObject instanceof HashMap && activityProxy != null) {
+				KrollDict options = new KrollDict((HashMap) activityObject);
+				activityProxy.handleCreationDict(options);
+			}
 		}
 
 		// Don't allow default processing.
@@ -500,7 +531,7 @@ public class TiUIActivityWindow extends TiUIView
 			windowActivity.getWindow().getDecorView().invalidate();
 
 		} else {
-			Log.w(LCAT, "Activity is null. windowPixelFormat not set.");
+			Log.w(TAG, "Activity is null. windowPixelFormat not set.");
 		}
 	}
 

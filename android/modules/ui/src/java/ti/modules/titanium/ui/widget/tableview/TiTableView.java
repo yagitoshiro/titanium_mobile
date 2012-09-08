@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -13,7 +13,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.TiContext;
 import org.appcelerator.titanium.proxy.TiViewProxy;
@@ -45,8 +44,7 @@ public class TiTableView extends FrameLayout
 	implements OnSearchChangeListener
 {
 	public static final int TI_TABLE_VIEW_ID = 101;
-	private static final String LCAT = "TiTableView";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TiTableView";
 
 	//TODO make this configurable
 	protected static final int MAX_CLASS_NAMES = 32;
@@ -88,9 +86,7 @@ public class TiTableView extends FrameLayout
 
 		protected void registerClassName(String className) {
 			if (!rowTypes.containsKey(className)) {
-				if (DBG) {
-					Log.d(LCAT, "registering new className " + className);
-				}
+				Log.d(TAG, "registering new className " + className, Log.DEBUG_MODE);
 				rowTypes.put(className, rowTypeCounter.incrementAndGet());
 			}
 		}
@@ -184,14 +180,21 @@ public class TiTableView extends FrameLayout
 					} else {
 						// otherwise compare class names
 						if (!v.getClassName().equals(item.className)) {
-							Log.w(LCAT, "Handed a view to convert with className " + v.getClassName() + " expected " + item.className);
+							Log.w(TAG, "Handed a view to convert with className " + v.getClassName() + " expected "
+								+ item.className, Log.DEBUG_MODE);
 							v = null;
 						}
 					}
 				}
 			}
 			if (v == null) {
-				if (item.className.equals(TableViewProxy.CLASSNAME_HEADER)) {
+				if (item.className.equals(TableViewProxy.CLASSNAME_HEADERVIEW)) {
+					TiViewProxy vproxy = item.proxy;
+					View headerView = layoutHeaderOrFooter(vproxy);
+					v = new TiTableViewHeaderItem(proxy.getActivity(), headerView);
+					v.setClassName(TableViewProxy.CLASSNAME_HEADERVIEW);
+					return v;
+				} else if (item.className.equals(TableViewProxy.CLASSNAME_HEADER)) {
 					v = new TiTableViewHeaderItem(proxy.getActivity());
 					v.setClassName(TableViewProxy.CLASSNAME_HEADER);
 				} else if (item.className.equals(TableViewProxy.CLASSNAME_NORMAL)) {
@@ -264,31 +267,49 @@ public class TiTableView extends FrameLayout
 		final KrollProxy fProxy = proxy;
 		listView.setOnScrollListener(new OnScrollListener()
 		{
+			private boolean scrollValid = false;
+			private int lastValidfirstItem = 0;
+			
 			@Override
 			public void onScrollStateChanged(AbsListView view, int scrollState)
 			{
-				if (scrollState == OnScrollListener.SCROLL_STATE_IDLE){
+				if (scrollState == OnScrollListener.SCROLL_STATE_IDLE) {
+					scrollValid = false;
 					KrollDict eventArgs = new KrollDict();
 					KrollDict size = new KrollDict();
 					size.put("width", TiTableView.this.getWidth());
 					size.put("height", TiTableView.this.getHeight());
 					eventArgs.put("size", size);
+					fProxy.fireEvent(TiC.EVENT_SCROLLEND, eventArgs);
+					// TODO: Deprecate old event
 					fProxy.fireEvent("scrollEnd", eventArgs);
+				}
+				else if (scrollState == OnScrollListener.SCROLL_STATE_TOUCH_SCROLL) {
+					scrollValid = true;
 				}
 			}
 
 			@Override
 			public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount)
 			{
-				KrollDict eventArgs = new KrollDict();
-				eventArgs.put("firstVisibleItem", firstVisibleItem);
-				eventArgs.put("visibleItemCount", visibleItemCount);
-				eventArgs.put("totalItemCount", totalItemCount);
-				KrollDict size = new KrollDict();
-				size.put("width", TiTableView.this.getWidth());
-				size.put("height", TiTableView.this.getHeight());
-				eventArgs.put("size", size);
-				fProxy.fireEvent("scroll", eventArgs);
+				boolean fireScroll = scrollValid;
+				if (!fireScroll && visibleItemCount > 0) {
+					//Items in a list can be selected with a track ball in which case
+					//we must check to see if the first visibleItem has changed.
+					fireScroll = (lastValidfirstItem != firstVisibleItem);
+				}
+				if(fireScroll) {
+					lastValidfirstItem = firstVisibleItem;
+					KrollDict eventArgs = new KrollDict();
+					eventArgs.put("firstVisibleItem", firstVisibleItem);
+					eventArgs.put("visibleItemCount", visibleItemCount);
+					eventArgs.put("totalItemCount", totalItemCount);
+					KrollDict size = new KrollDict();
+					size.put("width", TiTableView.this.getWidth());
+					size.put("height", TiTableView.this.getHeight());
+					eventArgs.put("size", size);
+					fProxy.fireEvent(TiC.EVENT_SCROLL, eventArgs);
+				}
 			}
 		});
 
@@ -367,10 +388,21 @@ public class TiTableView extends FrameLayout
 		}
 	}
 	
-	protected Item getItemAtPosition(int position) {
+	public Item getItemAtPosition(int position) {
 		return viewModel.getViewModel().get(adapter.index.get(position));
 	}
 
+	public int getIndexFromXY(double x, double y) {
+		int bound = listView.getLastVisiblePosition() - listView.getFirstVisiblePosition();
+		for (int i = 0; i <= bound; i++) {
+			View child = listView.getChildAt(i);
+			if (child != null && x >= child.getLeft() && x <= child.getRight() && y >= child.getTop() && y <= child.getBottom()) {
+				return listView.getFirstVisiblePosition() + i;
+			}
+		}
+		return -1;
+	}
+	
 	protected boolean rowClicked(TiBaseTableViewItem rowView, int position, boolean longClick) {
 		String viewClicked = rowView.getLastClickedViewName();
 		Item item = getItemAtPosition(position);
@@ -405,18 +437,18 @@ public class TiTableView extends FrameLayout
 
 		int width = AbsListView.LayoutParams.WRAP_CONTENT;
 		int height = AbsListView.LayoutParams.WRAP_CONTENT;
-		if (params.autoHeight) {
+		if (params.sizeOrFillHeightEnabled) {
 			if (params.autoFillsHeight) {
 				height = AbsListView.LayoutParams.FILL_PARENT;
 			}
-		} else {
+		} else if (params.optionHeight != null) {
 			height = params.optionHeight.getAsPixels(listView);
 		}
-		if (params.autoWidth) {
+		if (params.sizeOrFillWidthEnabled) {
 			if (params.autoFillsWidth) {
 				width = AbsListView.LayoutParams.FILL_PARENT;
 			}
-		} else {
+		} else if (params.optionWidth != null) {
 			width = params.optionWidth.getAsPixels(listView);
 		}
 		AbsListView.LayoutParams p = new AbsListView.LayoutParams(width, height);
@@ -485,5 +517,42 @@ public class TiTableView extends FrameLayout
 		}
 		viewModel = null;
 		itemClickListener = null;
+	}
+
+	@Override
+	protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+		// To prevent undesired "focus" and "blur" events during layout caused
+		// by ListView temporarily taking focus, we will disable focus events until
+		// layout has finished.
+		// First check for a quick exit. listView can be null, such as if window closing.
+		if (listView == null) {
+			super.onLayout(changed, left, top, right, bottom);
+			return;
+		}
+		OnFocusChangeListener focusListener = null;
+		View focusedView = listView.findFocus();
+		if (focusedView != null) {
+			OnFocusChangeListener listener = focusedView.getOnFocusChangeListener();
+			if (listener != null && listener instanceof TiUIView) {
+				focusedView.setOnFocusChangeListener(null);
+				focusListener = listener;
+			}
+		}
+
+		super.onLayout(changed, left, top, right, bottom);
+
+		TiViewProxy viewProxy = proxy;
+		if (viewProxy != null && viewProxy.hasListeners(TiC.EVENT_POST_LAYOUT)) {
+			viewProxy.fireEvent(TiC.EVENT_POST_LAYOUT, null);
+		}
+
+		// Layout is finished, re-enable focus events.
+		if (focusListener != null) {
+			focusedView.setOnFocusChangeListener(focusListener);
+			// If the configuration changed, we manually fire the blur event
+			if (changed) {
+				focusListener.onFocusChange(focusedView, false);
+			}
+		}
 	}
 }

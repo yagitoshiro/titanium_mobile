@@ -1,26 +1,67 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
 package org.appcelerator.titanium;
 
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.kroll.common.TiFastDev;
 import org.appcelerator.titanium.util.TiActivitySupport;
 import org.appcelerator.titanium.util.TiRHelper;
 
 import android.content.res.Configuration;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.LayerDrawable;
 import android.os.Bundle;
+import android.view.Window;
 
 public class TiRootActivity extends TiLaunchActivity
 	implements TiActivitySupport
 {
-	private static final String LCAT = "TiRootActivity";
-	private static final boolean DBG = TiConfig.LOGD;
+	private static final String TAG = "TiRootActivity";
+	private boolean finishing = false;
+
+	private Drawable[] backgroundLayers = {null, null};
+
+	public void setBackgroundColor(int color)
+	{
+		Window window = getWindow();
+		if (window == null) {
+			return;
+		}
+
+		Drawable colorDrawable = new ColorDrawable(color);
+		backgroundLayers[0] = colorDrawable;
+
+		if (backgroundLayers[1] != null) {
+			window.setBackgroundDrawable(new LayerDrawable(backgroundLayers));
+		} else {
+			window.setBackgroundDrawable(colorDrawable);
+		}
+	}
+
+	public void setBackgroundImage(Drawable image)
+	{
+		Window window = getWindow();
+		if (window == null) {
+			return;
+		}
+
+		backgroundLayers[1] = image;
+		if (image == null) {
+			window.setBackgroundDrawable(backgroundLayers[0]);
+			return;
+		}
+
+		if (backgroundLayers[0] != null) {
+			window.setBackgroundDrawable(new LayerDrawable(backgroundLayers));
+		} else {
+			window.setBackgroundDrawable(image);
+		}
+	}
 
 	@Override
 	public String getUrl()
@@ -31,14 +72,31 @@ public class TiRootActivity extends TiLaunchActivity
 	@Override
 	protected void onCreate(Bundle savedInstanceState)
 	{
-		getTiApp().setCurrentActivity(this, this);
+		if (willFinishFalseRootActivity(savedInstanceState)) {
+			return;
+		}
 
-		Log.checkpoint(LCAT, "checkpoint, on root activity create, savedInstanceState: " + savedInstanceState);
+		if (checkInvalidLaunch(savedInstanceState)) {
+			// Android bug 2373 detected and we're going to restart.
+			return;
+		}
 
-		TiApplication app = getTiApp();
-		app.setRootActivity(this);
+		TiApplication tiApp = getTiApp();
+
+		if (tiApp.isRestartPending() || TiBaseActivity.isUnsupportedReLaunch(this, savedInstanceState)) {
+			super.onCreate(savedInstanceState); // Will take care of scheduling restart and finishing.
+			return;
+		}
+
+		tiApp.setCurrentActivity(this, this);
+
+		Log.checkpoint(TAG, "checkpoint, on root activity create, savedInstanceState: " + savedInstanceState);
+
+		tiApp.setRootActivity(this);
 
 		super.onCreate(savedInstanceState);
+
+		tiApp.verifyCustomModules(this);
 	}
 
 	@Override
@@ -51,12 +109,10 @@ public class TiRootActivity extends TiLaunchActivity
 		super.windowCreated();
 	}
 
-	// Lifecyle
-
 	@Override
 	protected void onResume()
 	{
-		Log.checkpoint(LCAT, "checkpoint, on root activity resume. activity = " + this);
+		Log.checkpoint(TAG, "checkpoint, on root activity resume. activity = " + this);
 		super.onResume();
 	}
 
@@ -75,7 +131,7 @@ public class TiRootActivity extends TiLaunchActivity
 				}
 			}
 		} catch (Exception e) {
-			Log.e(LCAT, "Resource not found 'drawable.background': " + e.getMessage());
+			Log.e(TAG, "Resource not found 'drawable.background': " + e.getMessage());
 		}
 	}
 
@@ -83,25 +139,31 @@ public class TiRootActivity extends TiLaunchActivity
 	protected void onDestroy()
 	{
 		super.onDestroy();
-		if (DBG) {
-			Log.d(LCAT, "root activity onDestroy, activity = " + this);
+
+		if (finishing2373) {
+			return;
 		}
-		/*
-		if (tiContext != null) {
-			TiApplication app = tiContext.getTiApp();
-			if (app != null) {
-				app.releaseModules();
-			}
-			tiContext.release();
-		}
-		*/
+
+		Log.d(TAG, "root activity onDestroy, activity = " + this, Log.DEBUG_MODE);
 		TiFastDev.onDestroy();
 	}
 
-	/*
-	public TiContext getTiContext()
+	@Override
+	public void finish()
 	{
-		return tiContext;
+		if (finishing2373) {
+			super.finish();
+			return;
+		}
+
+		// Ensure we only run the finish logic once. We want to avoid an infinite loop since this method can be called
+		// from the finish method inside TiBaseActivity ( which can be triggered by terminateActivityStack() )
+		if (!finishing) {
+			finishing = true;
+			TiApplication.removeFromActivityStack(this);
+			TiApplication.terminateActivityStack();
+			super.finish();
+		}
 	}
-	*/
+
 }

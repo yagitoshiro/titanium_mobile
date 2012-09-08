@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2011-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -8,17 +8,59 @@
 	var TAG = "kroll";
 	var global = this;
 
+	// Works identical to Object.hasOwnProperty, except
+	// also works if the given object does not have the method
+	// on its prototype or it has been masked.
+	function hasOwnProperty(object, property) {
+		return Object.hasOwnProperty.call(object, property);
+	}
+
+	kroll.extend = function(thisObject, otherObject)
+	{
+		if (!otherObject) {
+			// extend with what?!  denied!
+			return;
+		}
+
+		for (var name in otherObject) {
+			if (hasOwnProperty(otherObject, name)) {
+				thisObject[name] = otherObject[name];
+			}
+		}
+
+		return thisObject;
+	}
+
 	function startup() {
 		startup.globalVariables();
 		startup.runMain();
 	}
 
+	// Used just to differentiate scope vars on java side by
+	// using a unique constructor name
+	function ScopeVars(vars) {
+		if (!vars) {
+			return this;
+		}
+
+		var keys = Object.keys(vars);
+		var length = keys.length;
+
+		for (var i = 0; i < length; ++i) {
+			var key = keys[i];
+			this[key] = vars[key];
+		}
+	}
+
 	startup.globalVariables = function() {
 		global.kroll = kroll;
+		kroll.ScopeVars = ScopeVars;
+		kroll.NativeModule = NativeModule; // So external module bootstrap.js can call NativeModule.require directly.
 
 		NativeModule.require('events');
 		global.Ti = global.Titanium = NativeModule.require('titanium');
 		global.Module = NativeModule.require("module");
+		global.console = NativeModule.require('console'); // Convenience toplevel alias for logging facilities
 	};
 
 	startup.runMain = function(mainModuleID) {
@@ -87,7 +129,10 @@
 			var source = NativeModule.getSource(this.id);
 			source = NativeModule.wrap(source);
 
-			var fn = runInThisContext(source, this.filename, true);
+			// All native modules have their filename prefixed with ti:/
+			var filename = 'ti:/' + this.filename;
+
+			var fn = runInThisContext(source, filename, true);
 			fn(this.exports, NativeModule.require, this, this.filename, null, global.Ti, global.Ti, global, kroll);
 		}
 

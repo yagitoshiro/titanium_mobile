@@ -1,12 +1,13 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
 package ti.modules.titanium.xml;
 
 import org.appcelerator.kroll.annotations.Kroll;
+import org.appcelerator.kroll.common.Log;
 import org.appcelerator.titanium.TiContext;
 import org.w3c.dom.DOMException;
 import org.w3c.dom.Node;
@@ -15,6 +16,7 @@ import org.w3c.dom.Text;
 @Kroll.proxy(parentModule=XMLModule.class)
 public class TextProxy extends CharacterDataProxy
 {
+	private final static String TAG = "Text"; 
 
 	private Text text;
 	public TextProxy(Text text)
@@ -67,9 +69,16 @@ public class TextProxy extends CharacterDataProxy
 		}
 		return getProxy(returnNode);
 	}
-
-	@Kroll.getProperty @Kroll.method
+	
+	@Kroll.getProperty @Kroll.method @Deprecated
 	public String getText()
+	{
+		Log.w(TAG, "The text property of Text is deprecated, use textContent instead.");
+		return getTextContent();
+	}
+	
+	@Kroll.getProperty @Kroll.method
+	public String getTextContent()
 	{
 		return this.text.getNodeValue();
 	}

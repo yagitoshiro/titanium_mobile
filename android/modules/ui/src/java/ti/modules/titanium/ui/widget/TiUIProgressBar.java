@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -11,6 +11,7 @@ import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.TiConvert;
+import org.appcelerator.titanium.util.TiUIHelper;
 import org.appcelerator.titanium.view.TiUIView;
 
 import android.view.Gravity;
@@ -24,11 +25,19 @@ public class TiUIProgressBar extends TiUIView {
 	private ProgressBar progress;
 	private LinearLayout view;
 	
-	public TiUIProgressBar(TiViewProxy proxy)
+	public TiUIProgressBar(final TiViewProxy proxy)
 	{
 		super(proxy);
 		
-		view = new LinearLayout(proxy.getActivity());
+		view = new LinearLayout(proxy.getActivity())
+		{
+			@Override
+			protected void onLayout(boolean changed, int left, int top, int right, int bottom)
+			{
+				super.onLayout(changed, left, top, right, bottom);
+				TiUIHelper.firePostLayoutEvent(proxy);
+			}
+		};
 		view.setOrientation(LinearLayout.VERTICAL);
 		label = new TextView(proxy.getActivity());
 		label.setGravity(Gravity.TOP | Gravity.LEFT);

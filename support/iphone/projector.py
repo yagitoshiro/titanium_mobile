@@ -101,7 +101,7 @@ class Projector(object):
 	def copy_module_resources(self, source, target):
 		if not os.path.exists(os.path.expanduser(target)):
 			os.mkdir(os.path.expanduser(target))
-		for root, dirs, files in os.walk(source):
+		for root, dirs, files in os.walk(source, True, None, True):
 			for name in ignoreDirs:
 				if name in dirs:
 					dirs.remove(name)	# don't visit ignored directories
@@ -117,8 +117,9 @@ class Projector(object):
 				if splitext(file_)[-1] in fileTargets:
 					processed = self.process_file(from_,to_)	
 				if not processed:	
-				 	if os.path.exists(to_): os.remove(to_)
-					print "[DEBUG] copying: %s => %s" % (from_,to_)
+				 	if os.path.exists(to_):
+				 		os.remove(to_)
+				 	print "[DEBUG] copying: %s => %s" % (from_,to_)
 				 	copyfile(from_, to_)
 	
 	def process_xcode(self,content):
@@ -129,10 +130,10 @@ class Projector(object):
 		content = content.replace('../lib','lib')
 		
 		content = content.replace('Titanium.plist','Info.plist')
-
-		content = content.replace('Titanium-KitchenSink',self.name)
-		
 		content = content.replace('Titanium',self.namespace)
+		
+		content = content.replace('%s-KitchenSink' % self.namespace, self.name)
+
 		content = content.replace('path = %s.app;' % self.namespace, 'path = "%s.app";'%self.name)
 		content = content.replace('PRODUCT_NAME = %s'%self.namespace,'PRODUCT_NAME = "%s"'%self.name)
 		content = content.replace('PRODUCT_NAME = %s-iPad'%self.namespace,'PRODUCT_NAME = "%s"'%self.name)

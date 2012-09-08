@@ -1,10 +1,9 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
-
 package org.appcelerator.titanium.util;
 
 import java.util.HashMap;
@@ -15,14 +14,23 @@ import org.appcelerator.kroll.common.Log;
 
 import android.graphics.Color;
 
+/**
+ * This class contain utility methods that converts a String color, like "red", into its corresponding RGB/RGBA representation.
+ */
 public class TiColorHelper
 {
 	static Pattern shortHexPattern = Pattern.compile("#([0-9a-f])([0-9a-f])([0-9a-f])([0-9a-f]?)");
 	static Pattern rgbPattern = Pattern.compile("rgb\\(([0-9]{1,3}),([0-9]{1,3}),([0-9]{1,3})\\)");
 	static Pattern argbPattern = Pattern.compile("rgba\\(([0-9]{1,3}),([0-9]{1,3}),([0-9]{1,3}),([0-9]{1,3})\\)");
 
+	private static final String TAG = "TiColorHelper";
 	private static HashMap<String, Integer> colorTable;
 
+	/**
+	 * Convert string representations of colors, like "red" into the corresponding RGB/RGBA representation.
+	 * @param value the color value to convert. For example, "red".
+	 * @return the RGB/RGBA representation (int) of the color.
+	 */
 	public static int parseColor(String value) {
 		int color = Color.YELLOW; // Something noticeable
 		if (value != null) {
@@ -63,7 +71,7 @@ public class TiColorHelper
 					if (colorTable.containsKey(lowval)) {
 						color = colorTable.get(lowval);
 					} else {
-						Log.w("TiColorHelper", "Unknown color: " + value);
+						Log.w(TAG, "Unknown color: " + value);
 					}
 				}
 			}

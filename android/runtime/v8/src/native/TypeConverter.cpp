@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2011-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -165,8 +165,11 @@ jobject TypeConverter::jsObjectToJavaFunction(v8::Handle<v8::Object> jsObject)
 		return NULL;
 	}
 
-	jlong pointer = (jlong) *Persistent<Function>::New(Handle<Function>::Cast(jsObject));
-	return env->NewObject(JNIUtil::v8FunctionClass, JNIUtil::v8FunctionInitMethod, pointer);
+	Persistent<Function> jsFunction = Persistent<Function>::New(Handle<Function>::Cast(jsObject));
+	jsFunction.MarkIndependent();
+
+	jlong ptr = (jlong) *jsFunction;
+	return env->NewObject(JNIUtil::v8FunctionClass, JNIUtil::v8FunctionInitMethod, ptr);
 }
 
 v8::Handle<v8::Function> TypeConverter::javaObjectToJsFunction(jobject javaObject)
@@ -233,9 +236,13 @@ jarray TypeConverter::jsArrayToJavaArray(v8::Handle<v8::Array> jsArray)
 	if (env == NULL) {
 		return NULL;
 	}
-
+	
 	int arrayLength = jsArray->Length();
 	jobjectArray javaArray = env->NewObjectArray(arrayLength, JNIUtil::objectClass, NULL);
+	if (javaArray == NULL) {
+		LOGE(TAG, "unable to create new jobjectArray");
+		return NULL;
+	}
 
 	for (int i = 0; i < arrayLength; i++) {
 		v8::Local<v8::Value> element = jsArray->Get(i);
@@ -325,7 +332,20 @@ jintArray TypeConverter::jsArrayToJavaIntArray(v8::Handle<v8::Array> jsArray)
 
 v8::Handle<v8::Array> TypeConverter::javaArrayToJsArray(jintArray javaIntArray)
 {
-	return javaDoubleArrayToJsNumberArray((jdoubleArray) javaIntArray);
+	JNIEnv *env = JNIScope::getEnv();
+	if (env == NULL) {
+		return v8::Handle<v8::Array>();
+	}
+
+	int arrayLength = env->GetArrayLength(javaIntArray);
+	v8::Handle<v8::Array> jsArray = v8::Array::New(arrayLength);
+
+	jint *arrayElements = env->GetIntArrayElements(javaIntArray, 0);
+	for (int i = 0; i < arrayLength; i++) {
+		jsArray->Set((uint32_t) i, v8::Integer::New(arrayElements[i]));
+	}
+
+	return jsArray;
 }
 
 jlongArray TypeConverter::jsArrayToJavaLongArray(v8::Handle<v8::Array> jsArray)
@@ -334,7 +354,8 @@ jlongArray TypeConverter::jsArrayToJavaLongArray(v8::Handle<v8::Array> jsArray)
 	if (env == NULL) {
 		return NULL;
 	}
-
+    
+	 
 	int arrayLength = jsArray->Length();
 	jlongArray javaLongArray = env->NewLongArray(arrayLength);
 	if (javaLongArray == NULL) {
@@ -352,38 +373,39 @@ jlongArray TypeConverter::jsArrayToJavaLongArray(v8::Handle<v8::Array> jsArray)
 	return javaLongArray;
 }
 
-v8::Handle<v8::Array> TypeConverter::javaArrayToJsArray(jlongArray javaLongArray)
-{
-	return javaDoubleArrayToJsNumberArray((jdoubleArray) javaLongArray);
-}
-
 jfloatArray TypeConverter::jsArrayToJavaFloatArray(v8::Handle<v8::Array> jsArray)
 {
 	JNIEnv *env = JNIScope::getEnv();
 	if (env == NULL) {
 		return NULL;
 	}
-
+    
+  
 	int arrayLength = jsArray->Length();
 	jfloatArray javaFloatArray = env->NewFloatArray(arrayLength);
 	if (javaFloatArray == NULL) {
 		LOGE(TAG, "unable to create new jfloatArray");
 		return NULL;
 	}
-
+    
 	jfloat* floatBuffer = new jfloat[arrayLength];
 	for (int i = 0; i < arrayLength; i++) {
 		v8::Local<v8::Value> element = jsArray->Get(i);
 		floatBuffer[i] = TypeConverter::jsNumberToJavaFloat(element->ToNumber());
 	}
 	env->SetFloatArrayRegion(javaFloatArray, 0, arrayLength, floatBuffer);
-
+    
 	return javaFloatArray;
+}
+
+v8::Handle<v8::Array> TypeConverter::javaArrayToJsArray(jlongArray javaLongArray)
+{
+	return javaLongArrayToJsNumberArray(javaLongArray);
 }
 
 v8::Handle<v8::Array> TypeConverter::javaArrayToJsArray(jfloatArray javaFloatArray)
 {
-	return javaDoubleArrayToJsNumberArray((jdoubleArray) javaFloatArray);
+	return javaFloatArrayToJsNumberArray(javaFloatArray);
 }
 
 jdoubleArray TypeConverter::jsArrayToJavaDoubleArray(v8::Handle<v8::Array> jsArray)
@@ -445,8 +467,12 @@ jobject TypeConverter::jsValueToJavaObject(v8::Local<v8::Value> jsValue, bool *i
 	}
 
 	if (jsValue->IsNumber()) {
-		jdouble javaDouble = TypeConverter::jsNumberToJavaDouble(jsValue->ToNumber());
 		*isNew = true;
+		if (jsValue->IsInt32()) {
+			jint javaInt = TypeConverter::jsNumberToJavaInt(jsValue->ToNumber());
+			return env->NewObject(JNIUtil::integerClass, JNIUtil::integerInitMethod, javaInt);
+		}
+		jdouble javaDouble = TypeConverter::jsNumberToJavaDouble(jsValue->ToNumber());
 		return env->NewObject(JNIUtil::doubleClass, JNIUtil::doubleInitMethod, javaDouble);
 
 	} else if (jsValue->IsBoolean()) {
@@ -508,7 +534,9 @@ jobject TypeConverter::jsValueToJavaObject(v8::Local<v8::Value> jsValue, bool *i
 		}
 	}
 
-	LOGW(TAG, "jsValueToJavaObject returning null");
+	if (!jsValue->IsNull() && !jsValue->IsUndefined()) {
+		LOGW(TAG, "jsValueToJavaObject returning null.");
+	}
 	return NULL;
 }
 
@@ -569,7 +597,9 @@ v8::Handle<v8::Value> TypeConverter::javaObjectToJsValue(jobject javaObject)
 			env->DeleteLocalRef(krollObject);
 
 			if (v8ObjectPointer != 0) {
-				return Persistent<Object>((Object *) v8ObjectPointer);
+				Persistent<Object> v8Object = Persistent<Object>((Object *) v8ObjectPointer);
+				JavaObject *jo = NativeObject::Unwrap<JavaObject>(v8Object);
+				return v8Object;
 			}
 		}
 
@@ -601,6 +631,9 @@ v8::Handle<v8::Value> TypeConverter::javaObjectToJsValue(jobject javaObject)
 
 	} else if (env->IsInstanceOf(javaObject, JNIUtil::booleanArrayClass)) {
 		return javaArrayToJsArray((jbooleanArray) javaObject);
+
+	} else if (env->IsSameObject(JNIUtil::undefinedObject, javaObject)) {
+		return v8::Undefined();
 	}
 
 	JNIUtil::logClassName("!!! Unable to convert unknown Java object class '%s' to Js value !!!",
@@ -655,7 +688,40 @@ v8::Handle<v8::Array> TypeConverter::javaDoubleArrayToJsNumberArray(jdoubleArray
 	for (int i = 0; i < arrayLength; i++) {
 		jsArray->Set((uint32_t) i, v8::Number::New(arrayElements[i]));
 	}
+	return jsArray;
+}
 
+v8::Handle<v8::Array> TypeConverter::javaLongArrayToJsNumberArray(jlongArray javaLongArray)
+{
+	JNIEnv *env = JNIScope::getEnv();
+	if (env == NULL) {
+		return v8::Handle<v8::Array>();
+	}
+    
+	int arrayLength = env->GetArrayLength(javaLongArray);
+	v8::Handle<v8::Array> jsArray = v8::Array::New(arrayLength);
+    
+	jlong *arrayElements = env->GetLongArrayElements(javaLongArray, 0);
+	for (int i = 0; i < arrayLength; i++) {
+		jsArray->Set((uint32_t) i, v8::Number::New(arrayElements[i]));
+	}
+	return jsArray;
+}
+
+v8::Handle<v8::Array> TypeConverter::javaFloatArrayToJsNumberArray(jfloatArray javaFloatArray)
+{
+	JNIEnv *env = JNIScope::getEnv();
+	if (env == NULL) {
+		return v8::Handle<v8::Array>();
+	}
+    
+	int arrayLength = env->GetArrayLength(javaFloatArray);
+	v8::Handle<v8::Array> jsArray = v8::Array::New(arrayLength);
+    
+	jfloat *arrayElements = env->GetFloatArrayElements(javaFloatArray, 0);
+	for (int i = 0; i < arrayLength; i++) {
+		jsArray->Set((uint32_t) i, v8::Number::New(arrayElements[i]));
+	}
 	return jsArray;
 }
 

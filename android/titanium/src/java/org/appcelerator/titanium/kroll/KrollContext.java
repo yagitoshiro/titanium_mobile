@@ -8,7 +8,6 @@ package org.appcelerator.titanium.kroll;
 
 import org.appcelerator.kroll.common.AsyncResult;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.kroll.common.TiMessenger;
 import org.appcelerator.titanium.TiApplication;
 import org.appcelerator.titanium.TiC;
@@ -18,10 +17,13 @@ import android.os.Message;
 import android.os.Messenger;
 import android.os.RemoteException;
 
+/**
+ * This class is deprecated, please see {@link org.appcelerator.kroll.KrollRuntime} instead
+ * @deprecated
+ */
 public class KrollContext implements Handler.Callback
 {
-	private static final String LCAT = "KrollContext";
-	private static boolean DBG = TiConfig.DEBUG;
+	private static final String TAG = "KrollContext";
 
 	private static final int MSG_EVAL_STRING = 1000;
 	private static final int MSG_EVAL_FILE = 1001;
@@ -30,7 +32,6 @@ public class KrollContext implements Handler.Callback
 
 	private static KrollContext _instance;
 
-	//private TiMessenger messageQueue;
 	private Handler handler;
 
 
@@ -49,14 +50,8 @@ public class KrollContext implements Handler.Callback
 
 	protected void initContext()
 	{
-		if (DBG) {
-			Log.d(LCAT, "Context Thread: " + Thread.currentThread().getName());
-		}
+		Log.d(TAG, "Context Thread: " + Thread.currentThread().getName(), Log.DEBUG_MODE);
 
-		// TODO - look at this again to make sure the behavior is correct
-		//messageQueue = TiApplication.getInstance().getMessageQueue();
-		//messageQueue = TiMessenger.getMessageQueue();
-		//messageQueue.setCallback(this);
 		handler = new Handler(this);
 	}
 
@@ -105,20 +100,15 @@ public class KrollContext implements Handler.Callback
 			filename = filename.replaceAll("file:///android_asset/", "");
 		}
 
-		if (DBG) {
-			Log.i(LCAT, "evalFile: " + filename);
-		}
+		Log.d(TAG, "evalFile: " + filename, Log.DEBUG_MODE);
 
 		if (isOurThread()) {
 			return handleEvalFile(filename);
 		}
 
-		//AsyncResult asyncResult = new AsyncResult();
-		//Message message = messageQueue.getHandler().obtainMessage(MSG_EVAL_FILE, asyncResult);
 		Message message = handler.obtainMessage(MSG_EVAL_FILE);
 		message.getData().putString(TiC.MSG_PROPERTY_FILENAME, filename);
-		//TiMessenger.getMessageQueue().sendBlockingMessage(msg, messageQueue, asyncResult);
-		//messageQueue.sendBlockingMessage(msg, asyncResult);
+
 		TiMessenger.sendBlockingRuntimeMessage(message);
 
 		if (messenger != null) {
@@ -126,11 +116,9 @@ public class KrollContext implements Handler.Callback
 				Message responseMsg = Message.obtain();
 				responseMsg.what = messageId;
 				messenger.send(responseMsg);
-				if (DBG) {
-					Log.d(LCAT, "Notifying caller that evalFile has completed");
-				}
+				Log.d(TAG, "Notifying caller that evalFile has completed", Log.DEBUG_MODE);
 			} catch(RemoteException e) {
-				Log.w(LCAT, "Failed to notify caller that eval completed");
+				Log.w(TAG, "Failed to notify caller that eval completed");
 			}
 		}
 
@@ -139,16 +127,8 @@ public class KrollContext implements Handler.Callback
 
 	public Object handleEvalFile(String filename)
 	{
-		/*KrollRuntime.getInstance().runModule(
-			KrollAssetHelper.readAsset(filename), filename);*/
-
 		return null;
 	}
-
-	/*public TiMessenger getMessageQueue()
-	{
-		return TiMessenger.getMessageQueue();
-	}*/
 
 	public void release()
 	{

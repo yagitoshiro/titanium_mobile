@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -8,6 +8,7 @@ package ti.modules.titanium.ui.widget.tableview;
 
 import java.util.ArrayList;
 
+import org.appcelerator.kroll.common.Log;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.TiContext;
 import org.appcelerator.titanium.proxy.TiViewProxy;
@@ -19,8 +20,7 @@ import ti.modules.titanium.ui.TableViewSectionProxy;
 
 public class TableViewModel
 {
-	private static final String LCAT = "TableViewModel";
-	private static final boolean DUMP = false;
+	private static final String TAG = "TableViewModel";
 
 	// Flat view
 
@@ -118,12 +118,23 @@ public class TableViewModel
 					if (headerTitle != null) {
 						viewModel.add(itemForHeader(index, section, headerTitle, null));
 					}
+					if (section.hasProperty(TiC.PROPERTY_HEADER_VIEW)) {
+						Object headerView = section.getProperty(TiC.PROPERTY_HEADER_VIEW);
+						if (headerView instanceof TiViewProxy) {
+							Item item = new Item(index);
+							item.proxy = (TiViewProxy) headerView;
+							item.className = TableViewProxy.CLASSNAME_HEADERVIEW;
+							viewModel.add(item);
+						} else {
+							Log.e(TAG, "HeaderView must be of type TiViewProxy");
+						}
+					}
 					for (TableViewRowProxy row : section.getRows()) {
 						Item item = new Item(index);
 						item.sectionIndex = sectionIndex;
 						item.indexInSection = indexInSection;
 						item.proxy = row;
-						item.rowData = row.getProperties().get("rowData");
+						item.rowData = row.getProperties().get(TiC.PROPERTY_ROW_DATA);
 						item.className = classNameForRow(row);
 
 						viewModel.add(item);

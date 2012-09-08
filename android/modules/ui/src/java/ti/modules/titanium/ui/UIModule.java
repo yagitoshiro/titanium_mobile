@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -12,20 +12,24 @@ import org.appcelerator.kroll.annotations.Kroll;
 import org.appcelerator.kroll.common.Log;
 import org.appcelerator.titanium.TiApplication;
 import org.appcelerator.titanium.TiBaseActivity;
+import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.TiContext;
+import org.appcelerator.titanium.TiDimension;
+import org.appcelerator.titanium.TiRootActivity;
 import org.appcelerator.titanium.proxy.TiWindowProxy;
-import org.appcelerator.titanium.util.TiConvert;
+import org.appcelerator.titanium.util.TiColorHelper;
 import org.appcelerator.titanium.util.TiOrientationHelper;
 import org.appcelerator.titanium.util.TiUIHelper;
-import org.appcelerator.titanium.view.TiDrawableReference;
 
 import android.app.Activity;
 import android.content.res.Resources;
-import android.graphics.drawable.ColorDrawable;
+import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Message;
-import android.view.Window;
+import android.text.util.Linkify;
+import android.view.View;
+import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 @Kroll.module
@@ -34,7 +38,7 @@ import android.widget.Toast;
 })
 public class UIModule extends KrollModule implements Handler.Callback
 {
-	private static final String LCAT = "TiUIModule";
+	private static final String TAG = "TiUIModule";
 
 	@Kroll.constant public static final int RETURNKEY_GO = 0;
 	@Kroll.constant public static final int RETURNKEY_GOOGLE = 1;
@@ -60,6 +64,13 @@ public class UIModule extends KrollModule implements Handler.Callback
 	@Kroll.constant public static final int KEYBOARD_NAMEPHONE_PAD = 6;
 	@Kroll.constant public static final int KEYBOARD_DEFAULT = 7;
 	@Kroll.constant public static final int KEYBOARD_DECIMAL_PAD = 8;
+	
+	@Kroll.constant public static final int AUTOLINK_ALL = Linkify.ALL;
+	@Kroll.constant public static final int AUTOLINK_EMAIL_ADDRESSES = Linkify.EMAIL_ADDRESSES;
+	@Kroll.constant public static final int AUTOLINK_MAP_ADDRESSES = Linkify.MAP_ADDRESSES;
+	@Kroll.constant public static final int AUTOLINK_PHONE_NUMBERS = Linkify.PHONE_NUMBERS;
+	@Kroll.constant public static final int AUTOLINK_URLS = Linkify.WEB_URLS;
+	@Kroll.constant public static final int AUTOLINK_NONE = 16;
 
 	@Kroll.constant public static final int INPUT_BORDERSTYLE_NONE = 0;
 	@Kroll.constant public static final int INPUT_BORDERSTYLE_ROUNDED = 1;
@@ -107,6 +118,27 @@ public class UIModule extends KrollModule implements Handler.Callback
 	@Kroll.constant public static final int TEXT_AUTOCAPITALIZATION_WORDS = 2;
 	@Kroll.constant public static final int TEXT_AUTOCAPITALIZATION_ALL = 3;
 
+	@Kroll.constant public static final String SIZE = TiC.LAYOUT_SIZE;
+	@Kroll.constant public static final String FILL = TiC.LAYOUT_FILL;
+	@Kroll.constant public static final String UNIT_PX = TiDimension.UNIT_PX;
+	@Kroll.constant public static final String UNIT_MM = TiDimension.UNIT_MM;
+	@Kroll.constant public static final String UNIT_CM = TiDimension.UNIT_CM;
+	@Kroll.constant public static final String UNIT_IN = TiDimension.UNIT_IN;
+	@Kroll.constant public static final String UNIT_DIP = TiDimension.UNIT_DIP;
+
+	// TiWebViewClient onReceivedError error codes.
+	@Kroll.constant public static final int URL_ERROR_AUTHENTICATION = WebViewClient.ERROR_AUTHENTICATION;
+	@Kroll.constant public static final int URL_ERROR_BAD_URL = WebViewClient.ERROR_BAD_URL;
+	@Kroll.constant public static final int URL_ERROR_CONNECT = WebViewClient.ERROR_CONNECT;
+	@Kroll.constant public static final int URL_ERROR_SSL_FAILED = WebViewClient.ERROR_FAILED_SSL_HANDSHAKE;
+	@Kroll.constant public static final int URL_ERROR_FILE = WebViewClient.ERROR_FILE;
+	@Kroll.constant public static final int URL_ERROR_FILE_NOT_FOUND = WebViewClient.ERROR_FILE_NOT_FOUND;
+	@Kroll.constant public static final int URL_ERROR_HOST_LOOKUP = WebViewClient.ERROR_HOST_LOOKUP;
+	@Kroll.constant public static final int URL_ERROR_REDIRECT_LOOP = WebViewClient.ERROR_REDIRECT_LOOP;
+	@Kroll.constant public static final int URL_ERROR_TIMEOUT = WebViewClient.ERROR_TIMEOUT;
+	@Kroll.constant public static final int URL_ERROR_UNKNOWN = WebViewClient.ERROR_UNKNOWN;
+	@Kroll.constant public static final int URL_ERROR_UNSUPPORTED_SCHEME = WebViewClient.ERROR_UNSUPPORTED_SCHEME;
+
 	protected static final int MSG_SET_BACKGROUND_COLOR = KrollProxy.MSG_LAST_ID + 100;
 	protected static final int MSG_SET_BACKGROUND_IMAGE = KrollProxy.MSG_LAST_ID + 101;
 	protected static final int MSG_SET_ORIENTATION = KrollProxy.MSG_LAST_ID + 102;
@@ -137,9 +169,9 @@ public class UIModule extends KrollModule implements Handler.Callback
 
 	protected void doSetBackgroundColor(String color)
 	{
-		Window w = TiApplication.getInstance().getRootActivity().getWindow();
-		if (w != null) {
-			w.setBackgroundDrawable(new ColorDrawable(TiConvert.toColor((String)color)));
+		TiRootActivity root = TiApplication.getInstance().getRootActivity();
+		if (root != null) {
+			root.setBackgroundColor(color != null ? TiColorHelper.parseColor(color) : Color.TRANSPARENT);
 		}
 	}
 
@@ -157,22 +189,21 @@ public class UIModule extends KrollModule implements Handler.Callback
 
 	protected void doSetBackgroundImage(Object image)
 	{
-		Window w = TiApplication.getInstance().getRootActivity().getWindow();
-		if (w != null) {
+		TiRootActivity root = TiApplication.getInstance().getRootActivity();
+		if (root != null) {
+			Drawable imageDrawable = null;
+
 			if (image instanceof Number) {
 				try {
-					w.setBackgroundDrawableResource(((Number)image).intValue());
+					imageDrawable = TiUIHelper.getResourceDrawable((Integer)image);
 				} catch (Resources.NotFoundException e) {
-					Log.w(LCAT , "Unable to set background drawable for root window.  An integer id was provided but no such drawable resource exists.");
+					Log.w(TAG , "Unable to set background drawable for root window.  An integer id was provided but no such drawable resource exists.");
 				}
-				return;
+			} else {
+				imageDrawable = TiUIHelper.getResourceDrawable(image);
 			}
-			// TODO - current activity should work just fine in this instance - verify?
-			TiDrawableReference drawableRef = TiDrawableReference.fromObject(TiApplication.getInstance().getCurrentActivity(), image);
-			Drawable d = drawableRef.getDrawable();
-			if (d != null) {
-				w.setBackgroundDrawable(d);
-			}
+
+			root.setBackgroundImage(imageDrawable);
 		}
 	}
 
@@ -186,6 +217,32 @@ public class UIModule extends KrollModule implements Handler.Callback
 			Message message = getMainHandler().obtainMessage(MSG_SET_ORIENTATION, tiOrientationMode);
 			message.sendToTarget();
 		}
+	}
+
+	@Kroll.method
+	public double convertUnits(String convertFromValue, String convertToUnits)
+	{
+		double result = 0;
+		TiDimension dimension = new TiDimension(convertFromValue, TiDimension.TYPE_UNDEFINED);
+
+		// TiDimension needs a view to grab the window manager, so we'll just use the decorview of the current window
+		View view = TiApplication.getAppCurrentActivity().getWindow().getDecorView();
+
+		if (view != null) {
+			if (convertToUnits.equals(UNIT_PX)) {
+				result = (double) dimension.getAsPixels(view);
+			} else if (convertToUnits.equals(UNIT_MM)) {
+				result = dimension.getAsMillimeters(view);
+			} else if (convertToUnits.equals(UNIT_CM)) {
+				result = dimension.getAsCentimeters(view);
+			} else if (convertToUnits.equals(UNIT_IN)) {
+				result = dimension.getAsInches(view);
+			} else if (convertToUnits.equals(UNIT_DIP)) {
+				result = (double) dimension.getAsDIP(view);
+			}
+		}
+
+		return result;
 	}
 
 	protected void doSetOrientation(int tiOrientationMode)
@@ -216,7 +273,7 @@ public class UIModule extends KrollModule implements Handler.Callback
 				}
 				else
 				{
-					Log.e(LCAT, "no window has been associated with activity, unable to set orientation");
+					Log.e(TAG, "No window has been associated with activity, unable to set orientation");
 				}
 			}
 			else
@@ -226,7 +283,6 @@ public class UIModule extends KrollModule implements Handler.Callback
 		}	
 	}
 
-	@SuppressWarnings("unchecked")
 	public boolean handleMessage(Message message)
 	{
 		switch (message.what) {

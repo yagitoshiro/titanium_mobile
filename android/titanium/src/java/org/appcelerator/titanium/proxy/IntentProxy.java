@@ -1,11 +1,13 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2012 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
 package org.appcelerator.titanium.proxy;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.util.Arrays;
 import java.util.List;
 
@@ -13,8 +15,8 @@ import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.kroll.annotations.Kroll;
 import org.appcelerator.kroll.common.Log;
-import org.appcelerator.kroll.common.TiConfig;
 import org.appcelerator.titanium.TiApplication;
+import org.appcelerator.titanium.TiBlob;
 import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.util.TiConvert;
 
@@ -23,16 +25,18 @@ import android.net.Uri;
 import android.text.TextUtils;
 
 @Kroll.proxy(propertyAccessors = {
-	TiC.PROPERTY_ACTION,
 	TiC.PROPERTY_CLASS_NAME,
 	TiC.PROPERTY_PACKAGE_NAME,
-	TiC.PROPERTY_TYPE,
 	TiC.PROPERTY_URL
 })
+/**
+ * This is a proxy representation of the Android Intent type.
+ * Refer to <a href="http://developer.android.com/reference/android/content/Intent.html">Android Intent</a>
+ * for more details.
+ */
 public class IntentProxy extends KrollProxy 
 {
 	private static final String TAG = "TiIntent";
-	private static boolean DBG = TiConfig.LOGD;
 
 	public static final int TYPE_ACTIVITY = 0;
 	public static final int TYPE_SERVICE = 1;
@@ -108,41 +112,32 @@ public class IntentProxy extends KrollProxy
 
 		if (dict.containsKey(TiC.PROPERTY_FLAGS)) {
 			flags = TiConvert.toInt(dict, TiC.PROPERTY_FLAGS);
-			if (DBG) {
-				Log.d(TAG, "Setting flags: " + Integer.toString(flags));
-			}
+			Log.d(TAG, "Setting flags: " + Integer.toString(flags), Log.DEBUG_MODE);
 			intent.setFlags(flags);
 		} else {
 			setProperty(TiC.PROPERTY_FLAGS, intent.getFlags());
 		}
 
 		if (action != null) {
-			if (DBG) {
-				Log.d(TAG, "Setting action: " + action);
-			}
+			Log.d(TAG, "Setting action: " + action, Log.DEBUG_MODE);
 			intent.setAction(action);
 		}
 
 		if (packageName != null) {
-			if (DBG) {
-				Log.d(TAG, "Setting package: " + packageName);
-			}
+			Log.d(TAG, "Setting package: " + packageName, Log.DEBUG_MODE);
 			intent.setPackage(packageName);
 		}
 
 		if (url != null) {
-			if (DBG) {
-				Log.d(TAG, "Creating intent for JS Activity/Service @ " + url);
-			}
+			Log.d(TAG, "Creating intent for JS Activity/Service @ " + url, Log.DEBUG_MODE);
 			packageName = TiApplication.getInstance().getPackageName();
 			className = packageName + "." + getURLClassName(url, this.type);
 		}
 
 		if (className != null) {
 			if (packageName != null) {
-				if (DBG) {
-					Log.d(TAG, "Both className and packageName set, using intent.setClassName(packageName, className");
-				}
+				Log.d(TAG, "Both className and packageName set, using intent.setClassName(packageName, className",
+					Log.DEBUG_MODE);
 				intent.setClassName(packageName, className);
 			} else {
 				try {
@@ -166,9 +161,7 @@ public class IntentProxy extends KrollProxy
 		// calling setType by itself clears the type and vice-versa
 		// if you have both you _must_ call setDataAndType
 		if (type != null) {
-			if (DBG) {
-				Log.d(TAG, "Setting type: " + type);
-			}
+			Log.d(TAG, "Setting type: " + type, Log.DEBUG_MODE);
 			if (data != null) {
 				intent.setDataAndType(Uri.parse(data), type);
 			} else {
@@ -230,9 +223,7 @@ public class IntentProxy extends KrollProxy
 	public void addCategory(String category)
 	{
 		if (category != null) {
-			if (DBG) {
-				Log.d(TAG, "Adding category: " + category);
-			}
+			Log.d(TAG, "Adding category: " + category, Log.DEBUG_MODE);
 			intent.addCategory(category);
 		}
 	}
@@ -240,7 +231,26 @@ public class IntentProxy extends KrollProxy
 	@Kroll.method
 	public String getStringExtra(String name)
 	{
-		return intent.getStringExtra(name);
+		if (!intent.hasExtra(name)) {
+			return null;
+		}
+
+		String result = intent.getStringExtra(name);
+		if (result == null) {
+			// One more try as parcelable extra, such as when it's a Uri.
+			// We can't really support getParcelableExtra(name) by itself,
+			// since the type of object coming out of it is unknown and
+			// might not make its way successfully over to Javascript.
+			// By getting it as a string, we at least allow people to grab
+			// Uris (Intent.STREAM) stored as parcelable extras, which is a
+			// very common use case.
+			Object parcelable = intent.getParcelableExtra(name);
+			if (parcelable != null) {
+				result = parcelable.toString();
+			}
+		}
+
+		return result;
 	}
 
 	@Kroll.method
@@ -267,27 +277,84 @@ public class IntentProxy extends KrollProxy
 		return intent.getDoubleExtra(name, defaultValue);
 	}
 
+	@Kroll.method
+	public TiBlob getBlobExtra(String name)
+	{
+		try {
+			Uri uri = (Uri) intent.getExtras().getParcelable(name);
+			InputStream is = TiApplication.getInstance().getContentResolver().openInputStream(uri);
+
+			ByteArrayOutputStream bos = new ByteArrayOutputStream();
+			int len;
+			int size = 4096;
+			byte[] buf = new byte[size];
+			while ((len = is.read(buf, 0, size)) != -1) {
+				bos.write(buf, 0, len);
+			}
+			buf = bos.toByteArray();
+
+			return TiBlob.blobFromData(buf);
+		} catch (Exception e) {
+			Log.e(TAG, "Error getting blob extra: " + e.getMessage(), e);
+			return null;
+		}
+	}
+
 	@Kroll.method @Kroll.getProperty
 	public String getData()
 	{
 		return intent.getDataString();
 	}
 
+	/**
+	 * @return the associated intent.
+	 */
 	public Intent getIntent()
 	{ 
 		return intent;
 	}
 
-	public int getType()
+	@Kroll.method @Kroll.getProperty
+	public String getType()
+	{
+		return intent.getType();
+	}
+
+	@Kroll.method @Kroll.setProperty
+	public void setType(String type)
+	{
+		intent.setType(type);
+	}
+
+	@Kroll.method @Kroll.getProperty
+	public String getAction()
+	{
+		return intent.getAction();
+	}
+
+	@Kroll.method @Kroll.setProperty
+	public void setAction(String action)
+	{
+		intent.setAction(action);
+	}
+
+	/**
+	 * @return intent type for internal purposes (TYPE_ACTIVITY, etc.)
+	 */
+	public int getInternalType()
 	{
 		return type;
 	}
 
-	public void setType(int type)
+	/**
+	 * Sets the intent type.
+	 * @param type the intent type for internal purposes (TYPE_ACTIVITY etc.)
+	 */
+	public void setInternalType(int type)
 	{
 		this.type = type;
 	}
-	
+
 	@Kroll.method
 	public boolean hasExtra(String name)
 	{
