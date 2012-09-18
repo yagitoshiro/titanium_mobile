@@ -96,13 +96,13 @@
 
 -(void)startLayout:(id)arg
 {
-    DebugLog(@"startLayout() method is deprecated since 2.2.0 .");
+    DebugLog(@"startLayout() method is deprecated since 3.0.0 .");
     updateStarted = YES;
     allowLayoutUpdate = NO;
 }
 -(void)finishLayout:(id)arg
 {
-    DebugLog(@"finishLayout() method is deprecated since 2.2.0 .");
+    DebugLog(@"finishLayout() method is deprecated since 3.0.0 .");
     updateStarted = NO;
     allowLayoutUpdate = YES;
     [self processTempProperties:nil];
@@ -110,7 +110,7 @@
 }
 -(void)updateLayout:(id)arg
 {
-    DebugLog(@"updateLayout() method is deprecated since 2.2.0, use applyProperties() instead.");
+    DebugLog(@"updateLayout() method is deprecated since 3.0.0, use applyProperties() instead.");
     id val = nil;
     if ([arg isKindOfClass:[NSArray class]]) {
         val = [arg objectAtIndex:0];
@@ -2297,7 +2297,7 @@ if(OSAtomicTestAndSetBarrier(flagBit, &dirtyflags))	\
         else if (TiDimensionIsAutoFill(constraint))
         {
             //Fill up the remaining
-            bounds.size.height = boundingValue + offsetV;
+            bounds.size.height = boundingValue;
             verticalLayoutBoundary += bounds.size.height;
         }
         else if (TiDimensionIsAutoSize(constraint))
@@ -2326,7 +2326,7 @@ if(OSAtomicTestAndSetBarrier(flagBit, &dirtyflags))	\
                 verticalLayoutBoundary += bounds.size.height;
             }
             else if (!TiDimensionIsUndefined([child layoutProperties]->top) && !TiDimensionIsUndefined([child layoutProperties]->bottom) ) {
-                bounds.size.height = boundingValue + offsetV;
+                bounds.size.height = boundingValue;
                 verticalLayoutBoundary += bounds.size.height;
             }
             else if (!TiDimensionIsUndefined([child layoutProperties]->centerY) && !TiDimensionIsUndefined([child layoutProperties]->bottom) ) {
