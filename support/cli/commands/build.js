@@ -7,17 +7,19 @@
 
 var appc = require('node-appc'),
 	ti = require('titanium-sdk'),
-	path = require('path');
+	path = require('path'),
+	codeProcessor = require('titanium-code-processor');
 
 // TODO: need to support building modules... how do we know if --dir is a module or app? where is the module _build.js located?
+
+exports.title = __('Build');
+exports.desc = __('builds a project');
+exports.extendedDesc = 'Builds an existing app or module project.';
 
 exports.config = function (logger, config, cli) {
 	return function (finished) {
 		ti.platformOptions(logger, config, cli, 'build', function (platformConf) {
 			finished({
-				title: __('Build'),
-				desc: __('builds a project'),
-				extendedDesc: 'Builds an existing app or module project.',
 				options: appc.util.mix({
 					platform: {
 						abbr: 'p',
@@ -43,7 +45,7 @@ exports.config = function (logger, config, cli) {
 						required: true,
 						values: ti.availablePlatforms
 					},
-					dir: {
+					'project-dir': {
 						abbr: 'd',
 						desc: __('the directory containing the project, otherwise the current working directory')
 					}
@@ -55,20 +57,15 @@ exports.config = function (logger, config, cli) {
 };
 
 exports.validate = function (logger, config, cli) {
-	cli.argv.dir = ti.validateProjectDir(logger, cli.argv.dir);
-	
-	if (!ti.validateCorrectSDK(logger, config, cli, cli.argv.dir)) {
-		// we're running the build command for the wrong SDK version, gracefully return
+	ti.validatePlatform(logger, cli.argv, 'platform');
+	if (ti.validatePlatformOptions(logger, config, cli, 'build') === false) {
 		return false;
 	}
-	
-	cli.argv.platform = ti.validatePlatform(logger, cli.argv.platform);
-	ti.validatePlatformOptions(logger, config, cli, 'build');
 };
 
 exports.run = function (logger, config, cli) {
-	var sdk = cli.env.getSDK(cli.argv.sdk),
-		buildModule = path.join(path.dirname(module.filename), '..', '..', cli.argv.platform, 'cli', 'commands', '_build.js');
+	var buildModule = path.join(path.dirname(module.filename), '..', '..', cli.argv.platform, 'cli', 'commands', '_build.js'),
+		tiapp = new ti.tiappxml(appc.fs.resolvePath(path.join(cli.argv['project-dir'], 'tiapp.xml')));
 	
 	if (!appc.fs.exists(buildModule)) {
 		logger.error(__('Unable to find platform specific build command') + '\n');
@@ -76,7 +73,42 @@ exports.run = function (logger, config, cli) {
 		process.exit(1);
 	}
 	
-	require(buildModule).run(logger, config, cli, function () {
-		logger.info(__('Project built successfully in %s', appc.time.prettyDiff(cli.startTime, Date.now())) + '\n');
+	// Run the code processor, if it is enabled
+	if (tiapp['code-processor'] && tiapp['code-processor'].enabled) {
+		codeProcessor.process([appc.fs.resolvePath(path.join(cli.argv['project-dir'], 'Resources', 'app.js'))], 
+			tiapp['code-processor'].plugins,
+			appc.util.mix(tiapp['code-processor'].options, {
+				sdkPath: path.resolve(path.join(__dirname, '..', '..')),
+				platform: cli.argv.platform
+			}), logger);
+		cli.codeProcessor = codeProcessor.getResults();
+		var errors = cli.codeProcessor.errors,
+			warnings = cli.codeProcessor.warnings,
+			data,
+			i, len;
+		for(i = 0, len = errors.length; i < len; i++) {
+			data = errors[i];
+			logger.error(data.description + ' (' + data.file + ':' + data.line + ':' + data.column + ')');
+		}
+		for(i = 0, len = warnings.length; i < len; i++) {
+			data = warnings[i];
+			logger.warn(data.description + ' (' + data.file + ':' + data.line + ':' + data.column + ')');
+		}
+		if (errors.length) {
+			process.exit(1);
+		}
+	}
+	
+	cli.fireHook('prebuild', function () {
+		require(buildModule).run(logger, config, cli, function (err) {
+			cli.fireHook('finalize', function () {
+				var delta = appc.time.prettyDiff(cli.startTime, Date.now());
+				if (err) {
+					logger.error(__('Project failed to build after %s', delta) + '\n');
+				} else {
+					logger.info(__('Project built successfully in %s', delta) + '\n');
+				}
+			});
+		});
 	});
 };
